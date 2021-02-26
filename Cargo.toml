@@ -10,3 +10,4 @@ edition = "2018"
 rltk = { version = "0.8.0" }
 specs = "0.16.1"
 specs-derive = "0.4.1"
+clap = "2.33.3"

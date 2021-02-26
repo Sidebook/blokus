@@ -1,5 +1,6 @@
 use rltk::{GameState, Point, Rltk, RGB};
 use specs::prelude::*;
+use clap::{App, Arg};
 
 mod components;
 pub use components::*;
@@ -112,6 +113,20 @@ impl GameState for State {
 }
 
 fn main() -> rltk::BError {
+    let matches = App::new("Blokus")
+                          .version("1.0")
+                          .author("Ryu Wakimoto")
+                          .about("Blokus implementation in Rust with Rltk")
+                          .arg(Arg::with_name("mode")
+                               .short("m")
+                               .long("mode")
+                               .help("Game mode. 'normal': 4-players game 'duo': 2-players game")
+                               .possible_values(&["normal", "duo"])
+                               .takes_value(true))
+                          .get_matches();
+    
+    let game_mode = matches.value_of("mode").unwrap_or("normal");
+
     use rltk::RltkBuilder;
     let context = RltkBuilder::simple(72, 64)?.with_title("Blokus").build()?;
 
@@ -124,7 +139,11 @@ fn main() -> rltk::BError {
     gs.ecs.register::<Player>();
     gs.ecs.register::<Rect>();
 
-    gs.prepare_game();
+    match game_mode {
+        "normal" => gs.prepare_4players_game(),
+        "duo" => gs.prepare_2players_game(),
+        _ => {}
+    };
 
     rltk::main_loop(context, gs)
 }
@@ -160,7 +179,7 @@ impl State {
         finished
     }
 
-    fn prepare_game(&mut self) {
+    fn prepare_4players_game(&mut self) {
         let players = vec![
             self.prepare_player(0, 5, 2, RGB::from_f32(1.0, 0.25, 0.2)),
             self.prepare_player(1, 5, 10, RGB::from_f32(0.2, 1.0, 0.2)),
@@ -168,8 +187,38 @@ impl State {
             self.prepare_player(3, 5, 52, RGB::from_f32(0.2, 0.7, 1.0)),
         ];
 
+        let mut map = Map::new(27, 20, 22, 22);
+        {
+            let players_store = self.ecs.read_storage::<Player>();
+            let player_comps: Vec<&Player> = players.iter().map(|e| players_store.get(*e).unwrap()).collect();
+            map.bind_left_top(player_comps[0]);
+            map.bind_right_top(player_comps[1]);
+            map.bind_right_bottom(player_comps[2]);
+            map.bind_left_bottom(player_comps[3]);
+        }
+
         self.ecs.insert(players);
-        self.ecs.insert(Map::new(27, 20, 22, 22));
+        self.ecs.insert(map);
+        self.ecs.insert(0 as usize);
+        self.ecs.insert(Mode::Initialize);
+    }
+
+    fn prepare_2players_game(&mut self) {
+        let players = vec![
+            self.prepare_player(0, 5, 7, RGB::from_f32(1.0, 0.25, 0.2)),
+            self.prepare_player(1, 5, 47, RGB::from_f32(1.0, 0.9, 0.2)),
+        ];
+
+        let mut map = Map::new(30, 23, 16, 16);
+        {
+            let players_store = self.ecs.read_storage::<Player>();
+            let player_comps: Vec<&Player> = players.iter().map(|e| players_store.get(*e).unwrap()).collect();
+            map.bind(player_comps[0], 5, 5);
+            map.bind(player_comps[1], 10, 10);
+        }
+
+        self.ecs.insert(players);
+        self.ecs.insert(map);
         self.ecs.insert(0 as usize);
         self.ecs.insert(Mode::Initialize);
     }

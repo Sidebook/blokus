@@ -2,28 +2,13 @@ use super::{Map, Player, Polynomio, Position, Rect, EMPTY, WALL};
 use rltk::{Rltk, RGB};
 
 pub fn draw_map(ctx: &mut Rltk, map: &Map) {
-    let colors = [
-        RGB::from_f32(1.0, 0.3, 0.2),
-        RGB::from_f32(0.2, 1.0, 0.2),
-        RGB::from_f32(1.0, 1.0, 0.2),
-        RGB::from_f32(0.2, 1.0, 1.0),
-    ];
-
     for (idx, &tile) in map.map.iter().enumerate() {
         let p = map.idx_point(idx);
-        if tile >= 0 {
+        if tile == EMPTY {
             ctx.set(
                 p.x + map.x,
                 p.y + map.y,
-                colors[tile as usize] * 0.8,
-                RGB::named(rltk::WHITE) * 0.9,
-                rltk::to_cp437('@'),
-            );
-        } else if tile == EMPTY {
-            ctx.set(
-                p.x + map.x,
-                p.y + map.y,
-                RGB::from_f32(0.8, 0.8, 0.8),
+                RGB::named(rltk::WHITE) * 0.8,
                 RGB::named(rltk::WHITE) * 0.9,
                 rltk::to_cp437('■'),
             );
@@ -31,11 +16,21 @@ pub fn draw_map(ctx: &mut Rltk, map: &Map) {
             ctx.set(
                 p.x + map.x,
                 p.y + map.y,
-                RGB::from_f32(0.8, 0.8, 0.8),
-                RGB::named(rltk::WHITE) * 0.9,
+                RGB::named(rltk::WHITE) * 0.2,
+                RGB::named(rltk::WHITE) * 0.6,
                 rltk::to_cp437(' '),
             );
         }
+    }
+
+    for key in map.colors.keys() {
+        ctx.set(
+            map.starts[key].x + map.x,
+            map.starts[key].y + map.y,
+            map.colors[key] * 0.8,
+            RGB::named(rltk::WHITE) * 0.9,
+            rltk::to_cp437('X'),
+        );
     }
 }
 

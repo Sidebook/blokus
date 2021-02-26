@@ -1,5 +1,6 @@
-use super::Polynomio;
-use rltk::Point;
+use std::collections::HashMap;
+use super::{Polynomio, Player};
+use rltk::{Point, RGB};
 
 pub const EMPTY: i32 = -1;
 pub const WALL: i32 = -2;
@@ -13,6 +14,8 @@ pub struct Map {
     pub y: i32,
     pub width: usize,
     pub height: usize,
+    pub colors: HashMap<i32, RGB>,
+    pub starts: HashMap<i32, Point>,
 }
 
 impl Map {
@@ -26,10 +29,6 @@ impl Map {
             map[i * width] = WALL;
             map[i * width + width - 1] = WALL;
         }
-        map[0] = 0;
-        map[width - 1] = 1;
-        map[width * height - 1] = 2;
-        map[width * (height - 1)] = 3;
 
         Map {
             map: map,
@@ -37,7 +36,30 @@ impl Map {
             y: y,
             width: width,
             height: height,
+            colors: HashMap::new(),
+            starts: HashMap::new(),
         }
+    }
+
+    pub fn bind(& mut self, player: &Player, start_x: i32, start_y: i32) {
+        self.colors.insert(player.id, player.color);
+        self.starts.insert(player.id, Point::new(start_x, start_y));
+    }
+
+    pub fn bind_left_top(& mut self, player: &Player) {
+        self.bind(player, 1, 1);
+    }
+
+    pub fn bind_right_top(& mut self, player: &Player) {
+        self.bind(player, self.width as i32 - 2, 1);
+    }
+
+    pub fn bind_left_bottom(& mut self, player: &Player) {
+        self.bind(player, 1, self.height as i32 - 2);
+    }
+
+    pub fn bind_right_bottom(& mut self, player: &Player) {
+        self.bind(player, self.width as i32 - 2, self.height as i32 - 2);
     }
 
     pub fn get(&self, p: Point) -> i32 {
@@ -67,6 +89,7 @@ impl Map {
     pub fn try_put(&mut self, position: Point, polynomio: &Polynomio, player_id: i32) -> bool {
         let mut no_touch_with_line = true;
         let mut touch_with_edge = false;
+        let mut include_start_position = false;
 
         for cood in &polynomio.coods {
             let p = *cood + position;
@@ -75,9 +98,10 @@ impl Map {
             }
             no_touch_with_line &= !self.touch_with_line(p, player_id);
             touch_with_edge |= self.touch_with_edge(p, player_id);
+            include_start_position |= self.starts[&player_id] == p;
         }
 
-        if !no_touch_with_line || !touch_with_edge {
+        if !no_touch_with_line || (!touch_with_edge && !include_start_position) {
             return false;
         }
 
