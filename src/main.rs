@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+use actix_web::web::Data;
 use rltk::{GameState, Point, Rltk, RGB};
 use specs::prelude::*;
 use clap::{App, Arg};
@@ -17,9 +19,29 @@ pub use render::*;
 mod stats_collect_system;
 pub use stats_collect_system::*;
 
+mod server;
+pub use server::*;
+
+mod input_source;
+pub use input_source::*;
+
 pub struct State {
     pub ecs: World,
     pub winner: usize,
+    pub ism: Data<Mutex<InputQueue>>,
+    pub my_player_id: i32,
+    pub use_local_input: bool,
+}
+
+impl State {
+    pub fn push_input(&mut self, player_id: i32, i: Input) {
+        self.ism.lock().unwrap().push(player_id, i);
+    }
+
+    pub fn pop_for(&mut self, player_id: i32) -> Option<Input> {
+        let mut input_queue = self.ism.lock().unwrap();
+        input_queue.pop_for(player_id)
+    }
 }
 
 #[derive(PartialEq, Copy, Clone)]
@@ -112,7 +134,12 @@ impl GameState for State {
     }
 }
 
+
 fn main() -> rltk::BError {
+    let ism: Data<Mutex<InputQueue>> = Data::new(
+        Mutex::new(InputQueue::new()));
+    start(ism.clone());
+
     let matches = App::new("Blokus")
                           .version("1.0")
                           .author("Ryu Wakimoto")
@@ -123,9 +150,21 @@ fn main() -> rltk::BError {
                                .help("Game mode. 'normal': 4-players game 'duo': 2-players game")
                                .possible_values(&["normal", "duo"])
                                .takes_value(true))
+                          .arg(Arg::with_name("type")
+                               .short("t")
+                               .long("type")
+                               .possible_values(&["local", "host", "client"])
+                               .takes_value(true))
+                          .arg(Arg::with_name("player-id")
+                               .short("p")
+                               .long("player-id")
+                                .takes_value(true))
                           .get_matches();
     
     let game_mode = matches.value_of("mode").unwrap_or("normal");
+    let instance_type = matches.value_of("type").unwrap_or("local");
+    let my_player_id = matches.value_of("player-id").unwrap_or("0").parse::<i32>().unwrap_or(0);
+    let use_local_input = instance_type == "local";
 
     use rltk::RltkBuilder;
     let context = RltkBuilder::simple(72, 64)?.with_title("Blokus").build()?;
@@ -133,6 +172,9 @@ fn main() -> rltk::BError {
     let mut gs = State {
         ecs: World::new(),
         winner: 0,
+        ism: ism.clone(),
+        my_player_id: my_player_id,
+        use_local_input: use_local_input,
     };
     gs.ecs.register::<Position>();
     gs.ecs.register::<Polynomio>();
