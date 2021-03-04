@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-use actix_web::web::Data;
 use super::{Map, Mode, Player, Polynomio, Position, State, Input};
 use rltk::{Point, Rltk, VirtualKeyCode};
 use specs::Entity;
@@ -45,13 +43,13 @@ pub fn player_input(gs: &mut State, ctx: &mut Rltk) -> Mode {
     let mode = *gs.ecs.fetch::<Mode>();
     match mode {
         Mode::Initialize => return Mode::Select,
-        Mode::Select => player_input_select(gs, ctx),
-        Mode::Put => player_input_put(gs, ctx),
+        Mode::Select => player_input_select(gs),
+        Mode::Put => player_input_put(gs),
         Mode::Finish => return Mode::Finish,
     }
 }
 
-fn player_input_select(gs: &mut State, ctx: &mut Rltk) -> Mode {
+fn player_input_select(gs: &mut State) -> Mode {
     let mut ended = false;
     {
         let active_player_id = *gs.ecs.read_resource::<usize>();
@@ -93,7 +91,7 @@ fn player_input_select(gs: &mut State, ctx: &mut Rltk) -> Mode {
     Mode::Select
 }
 
-fn player_input_put(gs: &mut State, ctx: &mut Rltk) -> Mode {
+fn player_input_put(gs: &mut State) -> Mode {
     let mut next_player = false;
     let _ended = false;
     {
