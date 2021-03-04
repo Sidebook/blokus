@@ -1,7 +1,4 @@
-use rltk::console;
-use std::sync::Arc;
 use std::collections::VecDeque;
-use std::sync::Mutex;
 
 pub enum Input {
     Left,
