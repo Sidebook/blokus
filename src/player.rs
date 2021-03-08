@@ -36,6 +36,9 @@ pub fn player_input(gs: &mut State, ctx: &mut Rltk) -> Mode {
             VirtualKeyCode::Escape => {
                 gs.push_input(player_id, Input::Cancel);
             }
+            VirtualKeyCode::Key0 => {
+                gs.push_input(player_id, Input::GiveUp);
+            }
             _ => {}
         },
     }
