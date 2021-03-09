@@ -1,8 +1,11 @@
-use std::sync::Mutex;
 use actix_web::web::Data;
+use clap::{App, AppSettings, Arg, SubCommand};
 use rltk::{GameState, Point, Rltk, RGB};
 use specs::prelude::*;
-use clap::{App, Arg};
+use std::sync::Mutex;
+use websocket::sync::Client;
+use websocket::ClientBuilder;
+use websocket::Message;
 
 mod components;
 pub use components::*;
@@ -19,11 +22,17 @@ pub use render::*;
 mod stats_collect_system;
 pub use stats_collect_system::*;
 
+mod polynomio_indexing_system;
+pub use polynomio_indexing_system::*;
+
 mod server;
 pub use server::*;
 
 mod input_source;
 pub use input_source::*;
+
+mod events;
+pub use events::*;
 
 pub struct State {
     pub ecs: World,
@@ -31,9 +40,38 @@ pub struct State {
     pub ism: Data<Mutex<InputQueue>>,
     pub my_player_id: i32,
     pub use_local_input: bool,
+    pub event_history: Vec<Box<dyn Event>>,
 }
 
 impl State {
+    pub fn new(
+        game_mode: &str,
+        ism: Data<Mutex<InputQueue>>,
+        my_player_id: i32,
+        use_local_input: bool,
+    ) -> Self {
+        let mut state = State {
+            ecs: World::new(),
+            winner: 0,
+            ism: ism.clone(),
+            my_player_id: my_player_id,
+            use_local_input: use_local_input,
+            event_history: Vec::new(),
+        };
+        state.ecs.register::<Position>();
+        state.ecs.register::<Polynomio>();
+        state.ecs.register::<Player>();
+        state.ecs.register::<Rect>();
+
+        match game_mode {
+            "normal" => state.prepare_4players_game(),
+            "duo" => state.prepare_2players_game(),
+            _ => {}
+        };
+
+        state
+    }
+
     pub fn push_input(&mut self, player_id: i32, i: Input) {
         self.ism.lock().unwrap().push(player_id, i);
     }
@@ -41,6 +79,19 @@ impl State {
     pub fn pop_for(&mut self, player_id: i32) -> Option<Input> {
         let mut input_queue = self.ism.lock().unwrap();
         input_queue.pop_for(player_id)
+    }
+
+    pub fn push_event(&mut self, event: Box<dyn Event>) {
+        self.event_history.push(event);
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(mut event) = self.event_history.pop() {
+            (*event).undo(self);
+            if event.should_chain_next() {
+                self.undo();
+            }
+        }
     }
 }
 
@@ -61,8 +112,13 @@ impl GameState for State {
             newmode = Mode::Finish;
         }
 
+        let mut polynomio_indexing_system = PolynomioIndexingSystem {};
+        polynomio_indexing_system.run_now(&self.ecs);
+
+        let currentmode;
         {
             let mut mode = self.ecs.write_resource::<Mode>();
+
             self.winner = if *mode != newmode {
                 let mut stats = StatsCollectSystem { winner: 0 };
                 stats.run_now(&self.ecs);
@@ -86,6 +142,7 @@ impl GameState for State {
                 ctx.print(5, i * 2 + 60, dialog);
             }
 
+            currentmode = *mode;
             *mode = newmode;
         }
 
@@ -104,7 +161,12 @@ impl GameState for State {
             draw_ui(ctx, pos, player, *active_player_id);
         }
         for (pos, polynomio) in (&positions, &polynomios).join() {
-            draw_polynomio(ctx, pos, polynomio);
+            let alpha = if currentmode == Mode::Put && polynomio.fixed {
+                0.7
+            } else {
+                1.0
+            };
+            draw_polynomio(ctx, pos, polynomio, alpha);
         }
 
         let players = self.ecs.read_storage::<Player>();
@@ -116,7 +178,7 @@ impl GameState for State {
         let active_position = positions.get(player.polynomios[player.select]).unwrap();
         let active_polynomio = polynomios.get(player.polynomios[player.select]).unwrap();
 
-        draw_polynomio(ctx, active_position, active_polynomio);
+        draw_polynomio(ctx, active_position, active_polynomio, 1.);
 
         if newmode != Mode::Finish {
             let upper_left = polynomios
@@ -134,60 +196,122 @@ impl GameState for State {
     }
 }
 
+struct ClientState {
+    pub ecs: World,
+    pub url: String,
+    pub player_id: i32,
+    pub client: Client<std::net::TcpStream>,
+}
+
+impl ClientState {
+    fn new(ecs: World, url: String, player_id: i32) -> Self {
+        ClientState {
+            ecs: ecs,
+            url: url,
+            player_id,
+            client: ClientBuilder::new("ws://127.0.0.1:8080/ws/")
+                .unwrap()
+                .connect_insecure()
+                .unwrap(),
+        }
+    }
+}
+
+impl GameState for ClientState {
+    fn tick(&mut self, ctx: &mut rltk::Rltk) {
+        ctx.cls();
+        ctx.print(5, 5, "Client Mode");
+        map_virtual_key_code(ctx.key).map(|i| {
+            let keytext = match i {
+                Input::RotateRight => "RotateRight",
+                Input::RotateLeft => "RotateLeft",
+                Input::Flip => "Flip",
+                Input::Up => "Up",
+                Input::Down => "Down",
+                Input::Left => "Left",
+                Input::Right => "Right",
+                Input::Enter => "Enter",
+                Input::Cancel => "Cancel",
+                Input::GiveUp => "GiveUp",
+            };
+            let message = format!("{} {}", self.player_id, keytext);
+            println!("Sending: {}", message);
+            self.client.send_message(&Message::text(message)).unwrap();
+        });
+    }
+}
 
 fn main() -> rltk::BError {
-    let ism: Data<Mutex<InputQueue>> = Data::new(
-        Mutex::new(InputQueue::new()));
-    start(ism.clone());
-
     let matches = App::new("Blokus")
-                          .version("1.0")
-                          .author("Ryu Wakimoto")
-                          .about("Blokus implementation in Rust with Rltk")
-                          .arg(Arg::with_name("mode")
-                               .short("m")
-                               .long("mode")
-                               .help("Game mode. 'normal': 4-players game 'duo': 2-players game")
-                               .possible_values(&["normal", "duo"])
-                               .takes_value(true))
-                          .arg(Arg::with_name("type")
-                               .short("t")
-                               .long("type")
-                               .possible_values(&["local", "host", "client"])
-                               .takes_value(true))
-                          .arg(Arg::with_name("player-id")
-                               .short("p")
-                               .long("player-id")
-                                .takes_value(true))
-                          .get_matches();
-    
+        .version("1.0")
+        .author("Ryu Wakimoto")
+        .about("Blokus implementation in Rust with Rltk")
+        .setting(AppSettings::SubcommandRequiredElseHelp)
+        .arg(
+            Arg::with_name("mode")
+                .short("m")
+                .long("mode")
+                .help("Game mode. 'normal': 4-players game 'duo': 2-players game")
+                .possible_values(&["normal", "duo"])
+                .takes_value(true),
+        )
+        .subcommand(SubCommand::with_name("play"))
+        .subcommand(
+            SubCommand::with_name("host").arg(
+                Arg::with_name("player-id")
+                    .short("p")
+                    .long("player-id")
+                    .takes_value(true),
+            ),
+        )
+        .subcommand(
+            SubCommand::with_name("join")
+                .arg(Arg::with_name("url").required(true).takes_value(true))
+                .arg(
+                    Arg::with_name("player-id")
+                        .short("p")
+                        .long("player-id")
+                        .required(true)
+                        .takes_value(true),
+                ),
+        )
+        .get_matches();
+
     let game_mode = matches.value_of("mode").unwrap_or("normal");
-    let instance_type = matches.value_of("type").unwrap_or("local");
-    let my_player_id = matches.value_of("player-id").unwrap_or("0").parse::<i32>().unwrap_or(0);
-    let use_local_input = instance_type == "local";
 
     use rltk::RltkBuilder;
     let context = RltkBuilder::simple(72, 64)?.with_title("Blokus").build()?;
 
-    let mut gs = State {
-        ecs: World::new(),
-        winner: 0,
-        ism: ism.clone(),
-        my_player_id: my_player_id,
-        use_local_input: use_local_input,
-    };
-    gs.ecs.register::<Position>();
-    gs.ecs.register::<Polynomio>();
-    gs.ecs.register::<Player>();
-    gs.ecs.register::<Rect>();
+    if let Some(_) = matches.subcommand_matches("play") {
+        let ism: Data<Mutex<InputQueue>> = Data::new(Mutex::new(InputQueue::new()));
+        let gs = State::new(game_mode, ism, 0, true);
 
-    match game_mode {
-        "normal" => gs.prepare_4players_game(),
-        "duo" => gs.prepare_2players_game(),
-        _ => {}
-    };
+        rltk::main_loop(context, gs)
+    } else if let Some(ref sub_matches) = matches.subcommand_matches("host") {
+        let my_player_id = sub_matches
+            .value_of("player-id")
+            .unwrap_or("0")
+            .parse::<i32>()
+            .unwrap_or(0);
 
-    rltk::main_loop(context, gs)
+        let ism: Data<Mutex<InputQueue>> = Data::new(Mutex::new(InputQueue::new()));
+        start(ism.clone());
+
+        let gs = State::new(game_mode, ism, my_player_id, false);
+        rltk::main_loop(context, gs)
+    } else if let Some(ref sub_matches) = matches.subcommand_matches("join") {
+        let my_player_id = sub_matches
+            .value_of("player-id")
+            .unwrap_or("0")
+            .parse::<i32>()
+            .unwrap_or(0);
+        let url = sub_matches.value_of("url").unwrap_or("localhost:8080/ws/");
+
+        let gs = ClientState::new(World::new(), url.to_string(), my_player_id);
+        rltk::main_loop(context, gs)
+    } else {
+        panic!("Unknown subcommand");
+    }
 }
 
 impl State {
@@ -232,7 +356,10 @@ impl State {
         let mut map = Map::new(27, 20, 22, 22);
         {
             let players_store = self.ecs.read_storage::<Player>();
-            let player_comps: Vec<&Player> = players.iter().map(|e| players_store.get(*e).unwrap()).collect();
+            let player_comps: Vec<&Player> = players
+                .iter()
+                .map(|e| players_store.get(*e).unwrap())
+                .collect();
             map.bind_left_top(player_comps[0]);
             map.bind_right_top(player_comps[1]);
             map.bind_right_bottom(player_comps[2]);
@@ -254,7 +381,10 @@ impl State {
         let mut map = Map::new(30, 23, 16, 16);
         {
             let players_store = self.ecs.read_storage::<Player>();
-            let player_comps: Vec<&Player> = players.iter().map(|e| players_store.get(*e).unwrap()).collect();
+            let player_comps: Vec<&Player> = players
+                .iter()
+                .map(|e| players_store.get(*e).unwrap())
+                .collect();
             map.bind(player_comps[0], 5, 5);
             map.bind(player_comps[1], 10, 10);
         }

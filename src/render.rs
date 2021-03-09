@@ -27,20 +27,21 @@ pub fn draw_map(ctx: &mut Rltk, map: &Map) {
         ctx.set(
             map.starts[key].x + map.x,
             map.starts[key].y + map.y,
-            map.colors[key] * 0.8,
+            map.colors[key],
             RGB::named(rltk::WHITE) * 0.9,
-            rltk::to_cp437('X'),
+            rltk::to_cp437('■'),
         );
     }
 }
 
-pub fn draw_polynomio(ctx: &mut Rltk, pos: &Position, polynomio: &Polynomio) {
+pub fn draw_polynomio(ctx: &mut Rltk, pos: &Position, polynomio: &Polynomio, alpha: f32) {
+    let color = polynomio.color * alpha;
     for cood in &polynomio.coods {
         ctx.set(
             pos.x + cood.x,
             pos.y + cood.y,
-            polynomio.color,
-            polynomio.color * 0.8,
+            color,
+            color * 0.8,
             rltk::to_cp437('■'),
         );
     }

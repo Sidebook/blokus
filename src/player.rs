@@ -1,49 +1,26 @@
-use super::{Map, Mode, Player, Polynomio, Position, State, Input};
+use super::{
+    GiveUpEvent, Input, Map, Mode, Player, Polynomio, Position, PutEvent, State, TurnChangeEvent,
+};
 use rltk::{Point, Rltk, VirtualKeyCode};
 use specs::Entity;
 use specs::WorldExt;
 
 pub fn player_input(gs: &mut State, ctx: &mut Rltk) -> Mode {
-    let active_player_id = *gs.ecs.read_resource::<usize>();
-    let player_id = if gs.use_local_input {active_player_id as i32} else {gs.my_player_id};
-    match ctx.key {
-        None => {}
-        Some(key) => match key {
-            VirtualKeyCode::R => {
-                gs.push_input(player_id, Input::RotateRight);
-            }
-            VirtualKeyCode::E => {
-                gs.push_input(player_id, Input::RotateLeft);
-            }
-            VirtualKeyCode::F => {
-                gs.push_input(player_id, Input::Flip);
-            }
-            VirtualKeyCode::Up => {
-                gs.push_input(player_id, Input::Up);
-            }
-            VirtualKeyCode::Down => {
-                gs.push_input(player_id, Input::Down);
-            }
-            VirtualKeyCode::Left => {
-                gs.push_input(player_id, Input::Left);
-            }
-            VirtualKeyCode::Right => {
-                gs.push_input(player_id, Input::Right);
-            }
-            VirtualKeyCode::Return => {
-                gs.push_input(player_id, Input::Enter);
-            }
-            VirtualKeyCode::Escape => {
-                gs.push_input(player_id, Input::Cancel);
-            }
-            VirtualKeyCode::Key0 => {
-                gs.push_input(player_id, Input::GiveUp);
-            }
-            _ => {}
-        },
+    let mode = *gs.ecs.fetch::<Mode>();
+    if ctx.key == Some(VirtualKeyCode::Z) {
+        gs.undo();
+        return mode;
     }
 
-    let mode = *gs.ecs.fetch::<Mode>();
+    let active_player_id = *gs.ecs.read_resource::<usize>();
+    let player_id = if gs.use_local_input {
+        active_player_id as i32
+    } else {
+        gs.my_player_id
+    };
+
+    map_virtual_key_code(ctx.key).map(|i| gs.push_input(player_id, i));
+
     match mode {
         Mode::Initialize => return Mode::Select,
         Mode::Select => player_input_select(gs),
@@ -53,16 +30,16 @@ pub fn player_input(gs: &mut State, ctx: &mut Rltk) -> Mode {
 }
 
 fn player_input_select(gs: &mut State) -> Mode {
+    let player_entity: Entity;
+    let active_player_id: usize;
     let mut ended = false;
     {
-        let active_player_id = *gs.ecs.read_resource::<usize>();
+        active_player_id = *gs.ecs.read_resource::<usize>();
+        player_entity = gs.ecs.fetch::<Vec<Entity>>()[active_player_id];
         let input = gs.pop_for(active_player_id as i32);
         let map = gs.ecs.write_resource::<Map>();
         let mut players = gs.ecs.write_storage::<Player>();
-        
-        let player = players
-            .get_mut(gs.ecs.fetch::<Vec<Entity>>()[active_player_id])
-            .unwrap();
+        let player = players.get_mut(player_entity).unwrap();
         let mut positions = gs.ecs.write_storage::<Position>();
         let mut active_position = positions.get_mut(player.polynomios[player.select]).unwrap();
 
@@ -90,24 +67,34 @@ fn player_input_select(gs: &mut State) -> Mode {
     }
     if ended {
         gs.next_player();
+        gs.push_event(Box::new(GiveUpEvent {
+            player_entity: player_entity,
+        }));
+        gs.push_event(Box::new(TurnChangeEvent {
+            from: active_player_id,
+        }));
     }
     Mode::Select
 }
 
 fn player_input_put(gs: &mut State) -> Mode {
     let mut next_player = false;
-    let _ended = false;
+    let mut ended = false;
+    let active_player_id: usize;
+    let player_entity;
+    let player_select;
+    let player;
     {
-        let active_player_id = *gs.ecs.read_resource::<usize>();
+        active_player_id = *gs.ecs.read_resource::<usize>();
+        player_entity = gs.ecs.fetch::<Vec<Entity>>()[active_player_id];
         let input = gs.pop_for(active_player_id as i32);
         let mut map = gs.ecs.write_resource::<Map>();
         let mut positions = gs.ecs.write_storage::<Position>();
         let mut polynomios = gs.ecs.write_storage::<Polynomio>();
         let mut players = gs.ecs.write_storage::<Player>();
-        
-        let player = players
-            .get_mut(gs.ecs.fetch::<Vec<Entity>>()[active_player_id])
-            .unwrap();
+
+        player = players.get_mut(player_entity).unwrap();
+        player_select = player.select;
         let active_position = positions.get_mut(player.polynomios[player.select]).unwrap();
         let active_polynomio = polynomios
             .get_mut(player.polynomios[player.select])
@@ -145,6 +132,7 @@ fn player_input_put(gs: &mut State) -> Mode {
                         player.fixed[player.select] = true;
                         if !select_next(player, false) {
                             player.end = true;
+                            ended = true;
                         }
                         next_player = true;
                     }
@@ -160,6 +148,18 @@ fn player_input_put(gs: &mut State) -> Mode {
     }
     if next_player {
         gs.next_player();
+        gs.push_event(Box::new(PutEvent {
+            player_entity: player_entity,
+            polynomio_id: player_select,
+        }));
+        gs.push_event(Box::new(TurnChangeEvent {
+            from: active_player_id,
+        }));
+        if ended {
+            gs.push_event(Box::new(GiveUpEvent {
+                player_entity: player_entity,
+            }));
+        }
         return Mode::Select;
     }
     Mode::Put
@@ -180,4 +180,23 @@ fn select_next(player: &mut Player, reverse: bool) -> bool {
     }
 
     return false;
+}
+
+pub fn map_virtual_key_code(key: Option<VirtualKeyCode>) -> Option<Input> {
+    match key {
+        None => None,
+        Some(key) => match key {
+            VirtualKeyCode::R => Some(Input::RotateRight),
+            VirtualKeyCode::E => Some(Input::RotateLeft),
+            VirtualKeyCode::F => Some(Input::Flip),
+            VirtualKeyCode::Up => Some(Input::Up),
+            VirtualKeyCode::Down => Some(Input::Down),
+            VirtualKeyCode::Left => Some(Input::Left),
+            VirtualKeyCode::Right => Some(Input::Right),
+            VirtualKeyCode::Return => Some(Input::Enter),
+            VirtualKeyCode::Escape => Some(Input::Cancel),
+            VirtualKeyCode::Key0 => Some(Input::GiveUp),
+            _ => None,
+        },
+    }
 }

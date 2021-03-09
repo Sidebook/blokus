@@ -19,9 +19,8 @@ pub struct InputQueue {
 }
 
 impl InputQueue {
-
     pub fn new() -> Self {
-        InputQueue{
+        InputQueue {
             queue: VecDeque::new(),
         }
     }

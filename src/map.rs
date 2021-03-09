@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use super::{Polynomio, Player};
+use super::{Player, Polynomio};
 use rltk::{Point, RGB};
+use std::collections::HashMap;
 
 pub const EMPTY: i32 = -1;
 pub const WALL: i32 = -2;
@@ -41,24 +41,24 @@ impl Map {
         }
     }
 
-    pub fn bind(& mut self, player: &Player, start_x: i32, start_y: i32) {
+    pub fn bind(&mut self, player: &Player, start_x: i32, start_y: i32) {
         self.colors.insert(player.id, player.color);
         self.starts.insert(player.id, Point::new(start_x, start_y));
     }
 
-    pub fn bind_left_top(& mut self, player: &Player) {
+    pub fn bind_left_top(&mut self, player: &Player) {
         self.bind(player, 1, 1);
     }
 
-    pub fn bind_right_top(& mut self, player: &Player) {
+    pub fn bind_right_top(&mut self, player: &Player) {
         self.bind(player, self.width as i32 - 2, 1);
     }
 
-    pub fn bind_left_bottom(& mut self, player: &Player) {
+    pub fn bind_left_bottom(&mut self, player: &Player) {
         self.bind(player, 1, self.height as i32 - 2);
     }
 
-    pub fn bind_right_bottom(& mut self, player: &Player) {
+    pub fn bind_right_bottom(&mut self, player: &Player) {
         self.bind(player, self.width as i32 - 2, self.height as i32 - 2);
     }
 
@@ -110,6 +110,23 @@ impl Map {
             let idx = self.point_idx(p);
             self.map[idx] = player_id;
         }
+        true
+    }
+
+    pub fn try_remove(&mut self, position: Point, polynomio: &Polynomio, player_id: i32) -> bool {
+        for cood in &polynomio.coods {
+            let p = *cood + position;
+            if !self.point_isin(p) || self.get(p) != player_id {
+                return false;
+            }
+        }
+
+        for cood in &polynomio.coods {
+            let p = *cood + position;
+            let idx = self.point_idx(p);
+            self.map[idx] = EMPTY;
+        }
+
         true
     }
 

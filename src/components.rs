@@ -55,6 +55,7 @@ pub struct Polynomio {
     pub coods: Vec<Point>,
     pub orig_coods: Vec<Point>,
     pub color: RGB,
+    pub fixed: bool,
 }
 
 impl Polynomio {
@@ -63,6 +64,7 @@ impl Polynomio {
             coods: coods.clone(),
             orig_coods: coods,
             color: color,
+            fixed: false,
         }
     }
 
