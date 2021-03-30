@@ -207,9 +207,9 @@ impl ClientState {
     fn new(ecs: World, url: String, player_id: i32) -> Self {
         ClientState {
             ecs: ecs,
-            url: url,
+            url: url.clone(),
             player_id,
-            client: ClientBuilder::new("ws://127.0.0.1:8080/ws/")
+            client: ClientBuilder::new(&url)
                 .unwrap()
                 .connect_insecure()
                 .unwrap(),

@@ -106,7 +106,7 @@ pub async fn start(ism: Data<Mutex<InputQueue>>) -> std::io::Result<()> {
             .service(web::resource("/ws/").to(echo_route))
             .app_data(ism.clone())
     })
-    .bind("127.0.0.1:8080")?
+    .bind("0.0.0.0:8080")?
     .run();
     Ok(())
 }
