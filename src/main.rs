@@ -2,10 +2,12 @@ use actix_web::web::Data;
 use clap::{App, AppSettings, Arg, SubCommand};
 use rltk::{GameState, Point, Rltk, RGB};
 use specs::prelude::*;
+use std::collections::VecDeque;
+use std::sync::Arc;
 use std::sync::Mutex;
-use websocket::sync::Client;
 use websocket::ClientBuilder;
 use websocket::Message;
+use specs::saveload::{SimpleMarker, SimpleMarkerAllocator, MarkedBuilder};
 
 mod components;
 pub use components::*;
@@ -31,6 +33,12 @@ pub use server::*;
 mod input_source;
 pub use input_source::*;
 
+mod broadcast;
+pub use broadcast::*;
+
+mod save_load_system;
+pub use save_load_system::*;
+
 mod events;
 pub use events::*;
 
@@ -41,6 +49,8 @@ pub struct State {
     pub my_player_id: i32,
     pub use_local_input: bool,
     pub event_history: Vec<Box<dyn Event>>,
+    pub broadcast: Option<Data<Mutex<BroadCastTarget>>>,
+    pub pending_broadcast: bool,
 }
 
 impl State {
@@ -49,6 +59,7 @@ impl State {
         ism: Data<Mutex<InputQueue>>,
         my_player_id: i32,
         use_local_input: bool,
+        broadcast: Option<Data<Mutex<BroadCastTarget>>>,
     ) -> Self {
         let mut state = State {
             ecs: World::new(),
@@ -57,11 +68,16 @@ impl State {
             my_player_id: my_player_id,
             use_local_input: use_local_input,
             event_history: Vec::new(),
+            broadcast: broadcast,
+            pending_broadcast: false,
         };
         state.ecs.register::<Position>();
         state.ecs.register::<Polynomio>();
         state.ecs.register::<Player>();
         state.ecs.register::<Rect>();
+        state.ecs.register::<SimpleMarker<SyncOnline>>();
+
+        state.ecs.insert(SimpleMarkerAllocator::<SyncOnline>::new());
 
         match game_mode {
             "normal" => state.prepare_4players_game(),
@@ -91,6 +107,28 @@ impl State {
             if event.should_chain_next() {
                 self.undo();
             }
+        }
+    }
+
+    pub fn broadcast(&mut self) {
+        if let Some(broadcast) = &self.broadcast {
+            if let Some(addr) = &broadcast.lock().unwrap().addr {
+                addr.try_send(BroadCast {
+                    content: Arc::new(dump_game(&mut self.ecs)),
+                })
+                .expect("Failed to broadcast");
+            }
+        }
+    }
+
+    pub fn request_broadcast(&mut self) {
+        self.pending_broadcast = true;
+    }
+
+    pub fn consume_broadcast(&mut self) {
+        if self.pending_broadcast {
+            self.broadcast();
+            self.pending_broadcast = false;
         }
     }
 }
@@ -146,53 +184,57 @@ impl GameState for State {
             *mode = newmode;
         }
 
-        let positions = self.ecs.read_storage::<Position>();
-        let players = self.ecs.read_storage::<Player>();
-        let active_player_id = self.ecs.fetch::<usize>();
-        let polynomios = self.ecs.read_storage::<Polynomio>();
-        let rects = self.ecs.read_storage::<Rect>();
-        let map = self.ecs.read_resource::<Map>();
+        {
+            let positions = self.ecs.read_storage::<Position>();
+            let players = self.ecs.read_storage::<Player>();
+            let active_player_id = self.ecs.fetch::<usize>();
+            let polynomios = self.ecs.read_storage::<Polynomio>();
+            let rects = self.ecs.read_storage::<Rect>();
+            let map = self.ecs.read_resource::<Map>();
 
-        draw_map(ctx, &*map);
-        for (pos, rect) in (&positions, &rects).join() {
-            draw_rect(ctx, pos, rect);
+            draw_map(ctx, &*map);
+            for (pos, rect) in (&positions, &rects).join() {
+                draw_rect(ctx, pos, rect);
+            }
+            for (pos, player) in (&positions, &players).join() {
+                draw_ui(ctx, pos, player, *active_player_id);
+            }
+            for (pos, polynomio) in (&positions, &polynomios).join() {
+                let alpha = if currentmode == Mode::Put && polynomio.fixed {
+                    0.7
+                } else {
+                    1.0
+                };
+                draw_polynomio(ctx, pos, polynomio, alpha);
+            }
+
+            let players = self.ecs.read_storage::<Player>();
+            let active_player_id = self.ecs.read_resource::<usize>();
+            let player = players
+                .get(self.ecs.fetch::<Vec<Entity>>()[*active_player_id])
+                .unwrap();
+
+            let active_position = positions.get(player.polynomios[player.select]).unwrap();
+            let active_polynomio = polynomios.get(player.polynomios[player.select]).unwrap();
+
+            draw_polynomio(ctx, active_position, active_polynomio, 1.);
+
+            if newmode != Mode::Finish {
+                let upper_left = polynomios
+                    .get(player.polynomios[player.select])
+                    .unwrap()
+                    .upper_left();
+                ctx.set(
+                    active_position.x + upper_left.x - 1,
+                    active_position.y + upper_left.y,
+                    RGB::named(rltk::WHITE),
+                    RGB::named(rltk::BLACK),
+                    rltk::to_cp437('>'),
+                );
+            }
         }
-        for (pos, player) in (&positions, &players).join() {
-            draw_ui(ctx, pos, player, *active_player_id);
-        }
-        for (pos, polynomio) in (&positions, &polynomios).join() {
-            let alpha = if currentmode == Mode::Put && polynomio.fixed {
-                0.7
-            } else {
-                1.0
-            };
-            draw_polynomio(ctx, pos, polynomio, alpha);
-        }
 
-        let players = self.ecs.read_storage::<Player>();
-        let active_player_id = self.ecs.read_resource::<usize>();
-        let player = players
-            .get(self.ecs.fetch::<Vec<Entity>>()[*active_player_id])
-            .unwrap();
-
-        let active_position = positions.get(player.polynomios[player.select]).unwrap();
-        let active_polynomio = polynomios.get(player.polynomios[player.select]).unwrap();
-
-        draw_polynomio(ctx, active_position, active_polynomio, 1.);
-
-        if newmode != Mode::Finish {
-            let upper_left = polynomios
-                .get(player.polynomios[player.select])
-                .unwrap()
-                .upper_left();
-            ctx.set(
-                active_position.x + upper_left.x - 1,
-                active_position.y + upper_left.y,
-                RGB::named(rltk::WHITE),
-                RGB::named(rltk::BLACK),
-                rltk::to_cp437('>'),
-            );
-        }
+        self.consume_broadcast();
     }
 }
 
@@ -200,27 +242,49 @@ struct ClientState {
     pub ecs: World,
     pub url: String,
     pub player_id: i32,
-    pub client: Client<std::net::TcpStream>,
+    pub websocket_sender: websocket::sender::Writer<std::net::TcpStream>,
+    pub message_queue: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl ClientState {
-    fn new(ecs: World, url: String, player_id: i32) -> Self {
+    fn new(url: String, player_id: i32) -> Self {
+        let msg_queue = Arc::new(Mutex::new(VecDeque::new()));
+        let client = ClientBuilder::new(&url)
+            .unwrap()
+            .connect_insecure()
+            .unwrap();
+        let (mut receiver, mut sender) = client.split().unwrap();
+
+        let msg_queue_thread = msg_queue.clone();
+
+        let mut ecs = World::new();
+
+        ecs.register::<Position>();
+        ecs.register::<Polynomio>();
+        ecs.register::<SimpleMarker<SyncOnline>>();
+
+        ecs.insert(SimpleMarkerAllocator::<SyncOnline>::new());
+
+        std::thread::spawn(move || {
+            for message in receiver.incoming_messages() {
+                if let Ok(websocket::OwnedMessage::Text(text)) = message {
+                    msg_queue_thread.lock().unwrap().push_back(text);
+                }
+            }
+        });
+
         ClientState {
             ecs: ecs,
             url: url.clone(),
             player_id,
-            client: ClientBuilder::new(&url)
-                .unwrap()
-                .connect_insecure()
-                .unwrap(),
+            websocket_sender: sender,
+            message_queue: msg_queue,
         }
     }
 }
 
 impl GameState for ClientState {
     fn tick(&mut self, ctx: &mut rltk::Rltk) {
-        ctx.cls();
-        ctx.print(5, 5, "Client Mode");
         map_virtual_key_code(ctx.key).map(|i| {
             let keytext = match i {
                 Input::RotateRight => "RotateRight",
@@ -236,11 +300,30 @@ impl GameState for ClientState {
             };
             let message = format!("{} {}", self.player_id, keytext);
             println!("Sending: {}", message);
-            self.client.send_message(&Message::text(message)).unwrap();
+            self.websocket_sender
+                .send_message(&Message::text(message))
+                .unwrap();
         });
-        for message in self.client.incoming_messages() {
-            let message = message.unwrap();
-            println!("Recv: {:?}", message);
+
+        let mut queue = self.message_queue.lock().unwrap();
+        while !queue.is_empty() {
+            let data = &queue.pop_front().unwrap();
+            println!("{:?}", data);
+            load_game(&mut self.ecs, data);
+            ctx.cls();
+            let positions = self.ecs.read_storage::<Position>();
+            let polynomios = self.ecs.read_storage::<Polynomio>();
+
+            for (pos, polynomio) in (&positions, &polynomios).join() {
+                // let alpha = if currentmode == Mode::Put && polynomio.fixed {
+                    // 0.7
+                // } else {
+                    // 1.0
+                // };
+                draw_polynomio(ctx, pos, polynomio, 1.0);
+            }
+
+            ctx.print(5, 5, "Client Mode");
         }
     }
 }
@@ -288,7 +371,7 @@ fn main() -> rltk::BError {
 
     if let Some(_) = matches.subcommand_matches("play") {
         let ism: Data<Mutex<InputQueue>> = Data::new(Mutex::new(InputQueue::new()));
-        let gs = State::new(game_mode, ism, 0, true);
+        let gs = State::new(game_mode, ism, 0, true, None);
 
         rltk::main_loop(context, gs)
     } else if let Some(ref sub_matches) = matches.subcommand_matches("host") {
@@ -299,9 +382,17 @@ fn main() -> rltk::BError {
             .unwrap_or(0);
 
         let ism: Data<Mutex<InputQueue>> = Data::new(Mutex::new(InputQueue::new()));
-        start(ism.clone());
+        let broadcast: Data<Mutex<BroadCastTarget>> =
+            Data::new(Mutex::new(BroadCastTarget { addr: None }));
 
-        let gs = State::new(game_mode, ism, my_player_id, false);
+        let ism_ref = ism.clone();
+        let broadcast_ref = broadcast.clone();
+
+        std::thread::spawn(move || {
+            start(ism_ref, broadcast_ref);
+        });
+
+        let gs = State::new(game_mode, ism, my_player_id, false, Some(broadcast));
         rltk::main_loop(context, gs)
     } else if let Some(ref sub_matches) = matches.subcommand_matches("join") {
         let my_player_id = sub_matches
@@ -311,7 +402,7 @@ fn main() -> rltk::BError {
             .unwrap_or(0);
         let url = sub_matches.value_of("url").unwrap_or("localhost:8080/ws/");
 
-        let gs = ClientState::new(World::new(), url.to_string(), my_player_id);
+        let gs = ClientState::new(url.to_string(), my_player_id);
         rltk::main_loop(context, gs)
     } else {
         panic!("Unknown subcommand");
@@ -370,6 +461,9 @@ impl State {
             map.bind_left_bottom(player_comps[3]);
         }
 
+        let data = serde_json::to_string(&map).unwrap();
+        println!("{:?}", data);
+
         self.ecs.insert(players);
         self.ecs.insert(map);
         self.ecs.insert(0 as usize);
@@ -423,12 +517,14 @@ impl State {
             .create_entity()
             .with(Position::new(x, y))
             .with(Polynomio::new(coods_vec.clone(), color * 0.2))
+            .marked::<SimpleMarker<SyncOnline>>()
             .build();
 
         self.ecs
             .create_entity()
             .with(Position::new(x, y))
             .with(Polynomio::new(coods_vec, color))
+            .marked::<SimpleMarker<SyncOnline>>()
             .build()
     }
 

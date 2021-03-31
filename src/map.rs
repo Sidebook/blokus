@@ -1,6 +1,7 @@
 use super::{Player, Polynomio};
 use rltk::{Point, RGB};
 use std::collections::HashMap;
+use serde::{Serialize, Deserialize};
 
 pub const EMPTY: i32 = -1;
 pub const WALL: i32 = -2;
@@ -8,6 +9,7 @@ pub const WALL: i32 = -2;
 const LINE_NEIGHBORS: [(i32, i32); 4] = [(-1, 0), (0, -1), (1, 0), (0, 1)];
 const EDGE_NEIGHBORS: [(i32, i32); 4] = [(-1, -1), (1, -1), (1, 1), (-1, 1)];
 
+#[derive(Serialize, Deserialize)]
 pub struct Map {
     pub map: Vec<i32>,
     pub x: i32,

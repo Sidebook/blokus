@@ -1,16 +1,17 @@
-use actix::clock::Duration;
 use super::{Input, InputQueue};
+use crate::BroadCastQueue;
+use actix::clock::Duration;
 use actix::prelude::*;
-use actix::*;
 use actix_web::web::Data;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
 use regex::Regex;
+use std::sync::Arc;
 use std::sync::Mutex;
 
 struct EchoSession {
     ism: Data<Mutex<InputQueue>>,
-    wsMonitor: Data<Addr<WebsocketSessionMonitor>>,
+    ws_monitor: Data<Addr<WebsocketSessionMonitor>>,
 }
 
 impl EchoSession {
@@ -23,8 +24,14 @@ impl Actor for EchoSession {
     type Context = ws::WebsocketContext<Self>;
 
     fn started(&mut self, _ctx: &mut Self::Context) {
-        self.wsMonitor.get_ref().do_send(WebSocketClientRegister {address: _ctx.address()})
+        self.ws_monitor
+            .get_ref()
+            .try_send(WebSocketClientRegister {
+                address: _ctx.address(),
+            })
+            .expect("Failed to add websocket session to WebSocketSessionMonitor");
     }
+
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
         Running::Stop
     }
@@ -43,7 +50,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for EchoSession {
             ws::Message::Ping(_) => {}
             ws::Message::Pong(_) => {}
             ws::Message::Text(text) => {
-                ctx.text(&format!["Got {}", text]);
+                // ctx.text(&format!["Got {}", text]);
                 let reg = Regex::new(r"([^\s]+)").unwrap();
                 let mut caps = reg.find_iter(&text);
                 let player_id = match caps.next() {
@@ -96,20 +103,23 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for EchoSession {
     }
 }
 
-impl Handler<ExampleMessage> for EchoSession {
+impl Handler<BroadCast> for EchoSession {
     type Result = ();
 
-    fn handle(&mut self, msg: ExampleMessage, ctx: &mut Self::Context) {
-        ctx.text(msg.text);
+    fn handle(&mut self, msg: BroadCast, ctx: &mut Self::Context) {
+        println!("Processing Broadcast event...");
+        ctx.text(format!["{}", msg.content]);
     }
 }
 
-struct WebsocketSessionMonitor {
+#[derive(Clone)]
+pub struct WebsocketSessionMonitor {
     addresses: Vec<Addr<EchoSession>>,
+    broadcast: Data<Mutex<BroadCastTarget>>,
 }
 
 #[derive(Message)]
-#[rtype(result = "WebSocketClientRegistration")]
+#[rtype(result = "()")]
 struct WebSocketClientRegister {
     address: Addr<EchoSession>,
 }
@@ -123,25 +133,45 @@ struct ExampleMessage {
     text: String,
 }
 
+#[derive(Message)]
+#[rtype(resut = "()")]
+#[derive(Clone)]
+pub struct BroadCast {
+    pub content: Arc<String>,
+}
+
 impl Actor for WebsocketSessionMonitor {
     type Context = Context<Self>;
 
-    fn started(& mut self, ctx: &mut Self::Context) {
-        // ctx.run_interval(Duration::from_secs(5), |act, _| {
-        //     for addr in &act.addresses {
-        //         addr.do_send(ExampleMessage {text: String::from("hogehoge")});
-        //     }
-        // });
+    fn started(&mut self, ctx: &mut Self::Context) {
+        println!("Started WebSocketSessionMonitor");
+        self.broadcast.lock().unwrap().addr = Some(ctx.address());
+    }
+
+    fn stopped(&mut self, _ctx: &mut Self::Context) {
+        println!("Stopped WebSocketSessionMonitor");
     }
 }
 
 impl Handler<WebSocketClientRegister> for WebsocketSessionMonitor {
-    type Result = WebSocketClientRegistration;
+    type Result = ();
 
-    fn handle(&mut self, register: WebSocketClientRegister, _: &mut Self::Context) -> WebSocketClientRegistration {
+    fn handle(&mut self, register: WebSocketClientRegister, _: &mut Self::Context) {
+        println!("Adding websocket session to monitor");
         self.addresses.push(register.address);
-        println!("Added address {}", self.addresses.len());
-        WebSocketClientRegistration {}
+    }
+}
+
+impl Handler<BroadCast> for WebsocketSessionMonitor {
+    type Result = ();
+
+    fn handle(&mut self, broadcast: BroadCast, _: &mut Self::Context) {
+        println!("Handling Broadcast event...");
+        println!("Will send to {} sessions", self.addresses.len());
+        for addr in self.addresses.iter() {
+            println!("Sending broadcast to session");
+            addr.do_send(broadcast.clone());
+        }
     }
 }
 
@@ -149,24 +179,37 @@ async fn echo_route(
     req: HttpRequest,
     stream: web::Payload,
     ism_data: Data<Mutex<InputQueue>>,
-    wsMonitor: Data<Addr<WebsocketSessionMonitor>>
+    ws_monitor: Data<Addr<WebsocketSessionMonitor>>,
 ) -> Result<HttpResponse, Error> {
-    let session = EchoSession { ism: ism_data, wsMonitor: wsMonitor};
+    println!("Connected from {:?}", req.peer_addr().unwrap());
+    let session = EchoSession {
+        ism: ism_data,
+        ws_monitor: ws_monitor,
+    };
     ws::start(session, &req, stream)
 }
 
+pub struct BroadCastTarget {
+    pub addr: Option<Addr<WebsocketSessionMonitor>>,
+}
+
 #[actix_rt::main]
-pub async fn start(ism: Data<Mutex<InputQueue>>) -> std::io::Result<()> {
-
-    let wsMonitor = WebsocketSessionMonitor { addresses: vec![] }.start();
-
+pub async fn start(
+    ism: Data<Mutex<InputQueue>>,
+    broadcast: Data<Mutex<BroadCastTarget>>,
+) -> std::io::Result<()> {
+    let ws_monitor_addr = WebsocketSessionMonitor {
+        addresses: vec![],
+        broadcast: broadcast.clone(),
+    }
+    .start();
     HttpServer::new(move || {
         App::new()
             .service(web::resource("/ws/").to(echo_route))
             .app_data(ism.clone())
-            .app_data(wsMonitor.clone())
+            .app_data(Data::new(ws_monitor_addr.clone()))
     })
     .bind("0.0.0.0:8080")?
-    .run();
-    Ok(())
+    .run()
+    .await
 }

@@ -1,10 +1,17 @@
+use serde::{Serialize, Deserialize};
+use specs::saveload::{Marker, ConvertSaveload};
+use specs::error::NoError;
 use super::Map;
 use rltk::{Point, RGB};
 use specs::prelude::*;
 use specs_derive::*;
 use std::cmp::min;
 
+
 #[derive(Component)]
+pub struct SyncOnline;
+
+#[derive(Component, ConvertSaveload, Clone)]
 pub struct Position {
     pub x: i32,
     pub y: i32,
@@ -50,7 +57,7 @@ impl Position {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, ConvertSaveload, Clone)]
 pub struct Polynomio {
     pub coods: Vec<Point>,
     pub orig_coods: Vec<Point>,

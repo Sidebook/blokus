@@ -7,8 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-rltk = { version = "0.8.0" }
-specs = "0.16.1"
+rltk = { version = "0.8.0", features = ["serde"] }
+specs = { version = "0.16.1", features = ["serde"] }
 specs-derive = "0.4.1"
 clap = "2.33.3"
 actix = "0.9.0"
@@ -17,3 +17,5 @@ actix-web = "2.0.0"
 actix-web-actors = "2.0.0"
 regex = "*"
 websocket = "*"
+serde = { version = "1.0.93", features = ["derive"] }
+serde_json = "1.0"

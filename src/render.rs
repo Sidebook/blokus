@@ -1,5 +1,5 @@
 use super::{Map, Player, Polynomio, Position, Rect, EMPTY, WALL};
-use rltk::{Rltk, RGB};
+use rltk::{Rltk, RGB, Point, Radians};
 
 pub fn draw_map(ctx: &mut Rltk, map: &Map) {
     for (idx, &tile) in map.map.iter().enumerate() {

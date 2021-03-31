@@ -1,3 +1,4 @@
+use crate::dump_game;
 use super::{
     GiveUpEvent, Input, Map, Mode, Player, Polynomio, Position, PutEvent, State, TurnChangeEvent,
 };
@@ -33,6 +34,7 @@ fn player_input_select(gs: &mut State) -> Mode {
     let player_entity: Entity;
     let active_player_id: usize;
     let mut ended = false;
+    let mut request_broadcast = false;
     {
         active_player_id = *gs.ecs.read_resource::<usize>();
         player_entity = gs.ecs.fetch::<Vec<Entity>>()[active_player_id];
@@ -45,23 +47,26 @@ fn player_input_select(gs: &mut State) -> Mode {
 
         match input {
             None => {}
-            Some(key) => match key {
-                Input::Right => {
-                    select_next(player, false);
+            Some(key) => {
+                request_broadcast = true;
+                match key {
+                    Input::Right => {
+                        select_next(player, false);
+                    }
+                    Input::Left => {
+                        select_next(player, true);
+                    }
+                    Input::Enter => {
+                        active_position.x = map.width as i32 / 2 + map.x;
+                        active_position.y = map.height as i32 / 2 + map.y;
+                        return Mode::Put;
+                    }
+                    Input::GiveUp => {
+                        player.end = true;
+                        ended = true;
+                    }
+                    _ => {}
                 }
-                Input::Left => {
-                    select_next(player, true);
-                }
-                Input::Enter => {
-                    active_position.x = map.width as i32 / 2 + map.x;
-                    active_position.y = map.height as i32 / 2 + map.y;
-                    return Mode::Put;
-                }
-                Input::GiveUp => {
-                    player.end = true;
-                    ended = true;
-                }
-                _ => {}
             },
         }
     }
@@ -74,16 +79,21 @@ fn player_input_select(gs: &mut State) -> Mode {
             from: active_player_id,
         }));
     }
+    if request_broadcast {
+        gs.request_broadcast();
+    }
     Mode::Select
 }
 
 fn player_input_put(gs: &mut State) -> Mode {
     let mut next_player = false;
     let mut ended = false;
+    let mut request_broadcast = false;
     let active_player_id: usize;
     let player_entity;
     let player_select;
     let player;
+    
     {
         active_player_id = *gs.ecs.read_resource::<usize>();
         player_entity = gs.ecs.fetch::<Vec<Entity>>()[active_player_id];
@@ -102,47 +112,50 @@ fn player_input_put(gs: &mut State) -> Mode {
 
         match input {
             None => {}
-            Some(key) => match key {
-                Input::RotateRight => {
-                    active_polynomio.rotate(true);
-                }
-                Input::RotateLeft => {
-                    active_polynomio.rotate(false);
-                }
-                Input::Flip => {
-                    active_polynomio.flip();
-                }
-                Input::Up => {
-                    active_position.translate_within(0, -1, &*map);
-                }
-                Input::Down => {
-                    active_position.translate_within(0, 1, &*map);
-                }
-                Input::Left => {
-                    active_position.translate_within(-1, 0, &*map);
-                }
-                Input::Right => {
-                    active_position.translate_within(1, 0, &*map);
-                }
-                Input::Enter => {
-                    active_position.to_point();
-                    let put_to = Point::new(active_position.x - map.x, active_position.y - map.y);
-
-                    if map.try_put(put_to, active_polynomio, active_player_id as i32) {
-                        player.fixed[player.select] = true;
-                        if !select_next(player, false) {
-                            player.end = true;
-                            ended = true;
-                        }
-                        next_player = true;
+            Some(key) => {
+                request_broadcast = true;
+                match key {
+                    Input::RotateRight => {
+                        active_polynomio.rotate(true);
                     }
+                    Input::RotateLeft => {
+                        active_polynomio.rotate(false);
+                    }
+                    Input::Flip => {
+                        active_polynomio.flip();
+                    }
+                    Input::Up => {
+                        active_position.translate_within(0, -1, &*map);
+                    }
+                    Input::Down => {
+                        active_position.translate_within(0, 1, &*map);
+                    }
+                    Input::Left => {
+                        active_position.translate_within(-1, 0, &*map);
+                    }
+                    Input::Right => {
+                        active_position.translate_within(1, 0, &*map);
+                    }
+                    Input::Enter => {
+                        active_position.to_point();
+                        let put_to = Point::new(active_position.x - map.x, active_position.y - map.y);
+
+                        if map.try_put(put_to, active_polynomio, active_player_id as i32) {
+                            player.fixed[player.select] = true;
+                            if !select_next(player, false) {
+                                player.end = true;
+                                ended = true;
+                            }
+                            next_player = true;
+                        }
+                    }
+                    Input::Cancel => {
+                        active_position.reset();
+                        active_polynomio.reset();
+                        return Mode::Select;
+                    }
+                    _ => {}
                 }
-                Input::Cancel => {
-                    active_position.reset();
-                    active_polynomio.reset();
-                    return Mode::Select;
-                }
-                _ => {}
             },
         }
     }
@@ -161,6 +174,9 @@ fn player_input_put(gs: &mut State) -> Mode {
             }));
         }
         return Mode::Select;
+    }
+    if request_broadcast {
+        gs.request_broadcast();
     }
     Mode::Put
 }
