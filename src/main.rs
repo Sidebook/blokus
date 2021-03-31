@@ -8,6 +8,7 @@ use std::sync::Mutex;
 use websocket::ClientBuilder;
 use websocket::Message;
 use specs::saveload::{SimpleMarker, SimpleMarkerAllocator, MarkedBuilder};
+use serde::{Serialize, Deserialize};
 
 mod components;
 pub use components::*;
@@ -41,6 +42,9 @@ pub use save_load_system::*;
 
 mod events;
 pub use events::*;
+
+mod entity_vec;
+pub use entity_vec::*;
 
 pub struct State {
     pub ecs: World,
@@ -76,6 +80,7 @@ impl State {
         state.ecs.register::<Player>();
         state.ecs.register::<Rect>();
         state.ecs.register::<SimpleMarker<SyncOnline>>();
+        state.ecs.register::<SerializeHelper>();
 
         state.ecs.insert(SimpleMarkerAllocator::<SyncOnline>::new());
 
@@ -126,14 +131,19 @@ impl State {
     }
 
     pub fn consume_broadcast(&mut self) {
-        if self.pending_broadcast {
+        let broadcast_request_from_clients = {
+            let mut input_queue = self.ism.lock().unwrap();
+            input_queue.consume_broadcast()
+        };
+
+        if self.pending_broadcast || broadcast_request_from_clients{
             self.broadcast();
             self.pending_broadcast = false;
         }
     }
 }
 
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Copy, Clone, Serialize, Deserialize, Debug)]
 pub enum Mode {
     Initialize,
     Select,
@@ -143,8 +153,7 @@ pub enum Mode {
 
 impl GameState for State {
     fn tick(&mut self, ctx: &mut Rltk) {
-        ctx.cls();
-        // ctx.print();
+
         let mut newmode = player_input(self, ctx);
         if self.is_finished() {
             newmode = Mode::Finish;
@@ -165,74 +174,15 @@ impl GameState for State {
                 self.winner
             };
 
-            let dialogs = match *mode {
-                Mode::Initialize => vec![],
-                Mode::Select => {
-                    vec!["Left/Right: Select a piece to put  Enter: Put  Num0: Give up".to_string()]
-                }
-                Mode::Put => vec![
-                    "Left/Right/Up/Down: Move a piece  Enter: Put  Num0: Give up".to_string(),
-                    "R: Rotate right  E: Rotate left  F: Flip  Esc: Cancel".to_string(),
-                ],
-                Mode::Finish => vec![format!["Player #{} won!", self.winner + 1]],
-            };
-            for (i, dialog) in dialogs.iter().enumerate() {
-                ctx.print(5, i * 2 + 60, dialog);
-            }
-
             currentmode = *mode;
             *mode = newmode;
         }
 
-        {
-            let positions = self.ecs.read_storage::<Position>();
-            let players = self.ecs.read_storage::<Player>();
-            let active_player_id = self.ecs.fetch::<usize>();
-            let polynomios = self.ecs.read_storage::<Polynomio>();
-            let rects = self.ecs.read_storage::<Rect>();
-            let map = self.ecs.read_resource::<Map>();
-
-            draw_map(ctx, &*map);
-            for (pos, rect) in (&positions, &rects).join() {
-                draw_rect(ctx, pos, rect);
-            }
-            for (pos, player) in (&positions, &players).join() {
-                draw_ui(ctx, pos, player, *active_player_id);
-            }
-            for (pos, polynomio) in (&positions, &polynomios).join() {
-                let alpha = if currentmode == Mode::Put && polynomio.fixed {
-                    0.7
-                } else {
-                    1.0
-                };
-                draw_polynomio(ctx, pos, polynomio, alpha);
-            }
-
-            let players = self.ecs.read_storage::<Player>();
-            let active_player_id = self.ecs.read_resource::<usize>();
-            let player = players
-                .get(self.ecs.fetch::<Vec<Entity>>()[*active_player_id])
-                .unwrap();
-
-            let active_position = positions.get(player.polynomios[player.select]).unwrap();
-            let active_polynomio = polynomios.get(player.polynomios[player.select]).unwrap();
-
-            draw_polynomio(ctx, active_position, active_polynomio, 1.);
-
-            if newmode != Mode::Finish {
-                let upper_left = polynomios
-                    .get(player.polynomios[player.select])
-                    .unwrap()
-                    .upper_left();
-                ctx.set(
-                    active_position.x + upper_left.x - 1,
-                    active_position.y + upper_left.y,
-                    RGB::named(rltk::WHITE),
-                    RGB::named(rltk::BLACK),
-                    rltk::to_cp437('>'),
-                );
-            }
+        if currentmode != newmode {
+            self.request_broadcast();
         }
+
+        render(&self.ecs, ctx);
 
         self.consume_broadcast();
     }
@@ -261,18 +211,38 @@ impl ClientState {
 
         ecs.register::<Position>();
         ecs.register::<Polynomio>();
+        ecs.register::<Player>();
         ecs.register::<SimpleMarker<SyncOnline>>();
+        ecs.register::<SerializeHelper>();
 
+        let empty_players: Vec<Entity> = Vec::new();
         ecs.insert(SimpleMarkerAllocator::<SyncOnline>::new());
+        ecs.insert(Map::new(0, 0, 1, 1));
+        ecs.insert(empty_players);
+        ecs.insert(0 as usize);
+        ecs.insert(Mode::Initialize);
 
         std::thread::spawn(move || {
             for message in receiver.incoming_messages() {
-                if let Ok(websocket::OwnedMessage::Text(text)) = message {
-                    msg_queue_thread.lock().unwrap().push_back(text);
+                match message {
+                    Ok(websocket::OwnedMessage::Text(text)) => {
+                        msg_queue_thread.lock().unwrap().push_back(text);
+                    },
+                    Ok(_) => {},
+                    Err(websocket::WebSocketError::NoDataAvailable) => {
+                        eprintln!("[ERROR] Disconnected from server. Exiting...");
+                        std::process::exit(1);
+                    }
+                    Err(err) => {
+                        eprintln!("[ERROR] Unknown error occured: {:?}", err);
+                        std::process::exit(1);
+                    }
                 }
             }
         });
 
+        sender.send_message(&Message::text(
+            format!("{} {}", player_id, "RequestBroadcast"))).unwrap();
         ClientState {
             ecs: ecs,
             url: url.clone(),
@@ -297,6 +267,7 @@ impl GameState for ClientState {
                 Input::Enter => "Enter",
                 Input::Cancel => "Cancel",
                 Input::GiveUp => "GiveUp",
+                Input::RequestBroadcast => "",
             };
             let message = format!("{} {}", self.player_id, keytext);
             println!("Sending: {}", message);
@@ -308,22 +279,11 @@ impl GameState for ClientState {
         let mut queue = self.message_queue.lock().unwrap();
         while !queue.is_empty() {
             let data = &queue.pop_front().unwrap();
-            println!("{:?}", data);
             load_game(&mut self.ecs, data);
-            ctx.cls();
-            let positions = self.ecs.read_storage::<Position>();
-            let polynomios = self.ecs.read_storage::<Polynomio>();
-
-            for (pos, polynomio) in (&positions, &polynomios).join() {
-                // let alpha = if currentmode == Mode::Put && polynomio.fixed {
-                    // 0.7
-                // } else {
-                    // 1.0
-                // };
-                draw_polynomio(ctx, pos, polynomio, 1.0);
-            }
-
-            ctx.print(5, 5, "Client Mode");
+            println!("Received game update: mode: {:?}, apid: {:?}",
+                *self.ecs.fetch::<Mode>(),
+                *self.ecs.fetch::<usize>());
+            render(&self.ecs, ctx);
         }
     }
 }
@@ -390,6 +350,7 @@ fn main() -> rltk::BError {
 
         std::thread::spawn(move || {
             start(ism_ref, broadcast_ref);
+            std::process::exit(0);
         });
 
         let gs = State::new(game_mode, ism, my_player_id, false, Some(broadcast));
@@ -516,14 +477,14 @@ impl State {
         self.ecs
             .create_entity()
             .with(Position::new(x, y))
-            .with(Polynomio::new(coods_vec.clone(), color * 0.2))
+            .with(Polynomio::new(coods_vec.clone(), color * 0.2, true))
             .marked::<SimpleMarker<SyncOnline>>()
             .build();
 
         self.ecs
             .create_entity()
             .with(Position::new(x, y))
-            .with(Polynomio::new(coods_vec, color))
+            .with(Polynomio::new(coods_vec, color, false))
             .marked::<SimpleMarker<SyncOnline>>()
             .build()
     }
@@ -666,6 +627,7 @@ impl State {
             .create_entity()
             .with(Player::new(id, ps, color))
             .with(Position::new(x, y))
+            .marked::<SimpleMarker<SyncOnline>>()
             .build();
         return player;
     }
@@ -689,6 +651,7 @@ impl State {
             .create_entity()
             .with(Player::new(id, ps, color))
             .with(Position::new(x, y))
+            .marked::<SimpleMarker<SyncOnline>>()
             .build();
         return player;
     }

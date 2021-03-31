@@ -1,7 +1,75 @@
-use super::{Map, Player, Polynomio, Position, Rect, EMPTY, WALL};
-use rltk::{Rltk, RGB, Point, Radians};
+use crate::Mode;
+use specs::prelude::*;
 
-pub fn draw_map(ctx: &mut Rltk, map: &Map) {
+use super::{Map, Player, Polynomio, Position, Rect, EMPTY, WALL};
+use rltk::{Rltk, RGB};
+
+
+pub fn render(ecs: &World, ctx: &mut Rltk) {
+    ctx.cls();
+
+    let mode = *ecs.fetch::<Mode>();
+
+    let dialogs = match mode {
+        Mode::Initialize => vec![],
+        Mode::Select => {
+            vec!["Left/Right: Select a piece to put  Enter: Put  Num0: Give up".to_string()]
+        }
+        Mode::Put => vec![
+            "Left/Right/Up/Down: Move a piece  Enter: Put  Num0: Give up".to_string(),
+            "R: Rotate right  E: Rotate left  F: Flip  Esc: Cancel".to_string(),
+        ],
+        Mode::Finish => vec![format!["Player ??? won!"]],
+    };
+    for (i, dialog) in dialogs.iter().enumerate() {
+        ctx.print(5, i * 2 + 60, dialog);
+    }
+
+    draw_map(ecs, ctx);
+    draw_uis(&ecs, ctx);
+    
+    draw_polynomios(&ecs, ctx, mode, true);
+    draw_polynomios(&ecs, ctx, mode, false);
+
+    let players = ecs.read_storage::<Player>();
+    let active_player_id = ecs.read_resource::<usize>();
+
+    let positions = ecs.read_storage::<Position>();
+    let polynomios = ecs.read_storage::<Polynomio>();
+
+    // let player = players
+    //     .get(ecs.fetch::<Vec<Entity>>()[*active_player_id])
+    //     .unwrap();
+
+    let entities = ecs.entities();
+    if mode != Mode::Finish {
+        for (_, player) in (&entities, &players).join() {
+            if player.id != *active_player_id as i32 {
+                continue;
+            }
+            let active_position = positions.get(player.polynomios[player.select]).unwrap();
+            let active_polynomio = polynomios.get(player.polynomios[player.select]).unwrap();
+
+            draw_polynomio(ctx, active_position, active_polynomio, 1.);
+
+            let upper_left = polynomios
+                .get(player.polynomios[player.select])
+                .unwrap()
+                .upper_left();
+            ctx.set(
+                active_position.x + upper_left.x - 1,
+                active_position.y + upper_left.y,
+                player.color,
+                RGB::named(rltk::BLACK),
+                rltk::to_cp437('>'),
+            );
+        }
+    }
+}
+
+pub fn draw_map(ecs: & World, ctx: &mut Rltk) {
+    let map = ecs.read_resource::<Map>();
+
     for (idx, &tile) in map.map.iter().enumerate() {
         let p = map.idx_point(idx);
         if tile == EMPTY {
@@ -31,6 +99,27 @@ pub fn draw_map(ctx: &mut Rltk, map: &Map) {
             RGB::named(rltk::WHITE) * 0.9,
             rltk::to_cp437('■'),
         );
+    }
+}
+
+pub fn draw_polynomios(
+    ecs: & World,
+    ctx: &mut Rltk,
+    mode: Mode,
+    bg: bool,
+) {
+    let positions = ecs.read_storage::<Position>();
+    let polynomios = ecs.read_storage::<Polynomio>();
+    for (pos, polynomio) in (&positions, &polynomios).join() {
+        if polynomio.bg != bg {
+            continue;
+        }
+        let alpha = if mode == Mode::Put && polynomio.fixed {
+            0.7
+        } else {
+            1.0
+        };
+        draw_polynomio(ctx, pos, polynomio, alpha);
     }
 }
 
@@ -79,6 +168,17 @@ pub fn draw_rect(ctx: &mut Rltk, position: &Position, rect: &Rect) {
             RGB::named(rltk::BLACK),
             rltk::to_cp437('|'),
         );
+    }
+}
+
+
+pub fn draw_uis(ecs: &World, ctx: &mut Rltk) {
+    let positions = ecs.read_storage::<Position>();
+    let players = ecs.read_storage::<Player>();
+    let active_player_id = ecs.fetch::<usize>();
+
+    for (pos, player) in (&positions, &players).join() {
+        draw_ui(ctx, pos, player, *active_player_id);
     }
 }
 

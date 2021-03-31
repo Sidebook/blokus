@@ -1,6 +1,4 @@
 use super::{Input, InputQueue};
-use crate::BroadCastQueue;
-use actix::clock::Duration;
 use actix::prelude::*;
 use actix_web::web::Data;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
@@ -67,6 +65,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for EchoSession {
 
                 match caps.next() {
                     Some(command) => match command.as_str() {
+                        "RequestBroadcast" => self.push_input(player_id, Input::RequestBroadcast),
                         "Left" => self.push_input(player_id, Input::Left),
                         "Right" => self.push_input(player_id, Input::Right),
                         "Up" => self.push_input(player_id, Input::Up),
@@ -126,12 +125,6 @@ struct WebSocketClientRegister {
 
 #[derive(MessageResponse)]
 struct WebSocketClientRegistration;
-
-#[derive(Message)]
-#[rtype(result = "")]
-struct ExampleMessage {
-    text: String,
-}
 
 #[derive(Message)]
 #[rtype(resut = "()")]

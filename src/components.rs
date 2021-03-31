@@ -1,3 +1,4 @@
+use crate::Mode;
 use serde::{Serialize, Deserialize};
 use specs::saveload::{Marker, ConvertSaveload};
 use specs::error::NoError;
@@ -6,6 +7,7 @@ use rltk::{Point, RGB};
 use specs::prelude::*;
 use specs_derive::*;
 use std::cmp::min;
+use crate::entity_vec::EntityVec;
 
 
 #[derive(Component)]
@@ -63,15 +65,17 @@ pub struct Polynomio {
     pub orig_coods: Vec<Point>,
     pub color: RGB,
     pub fixed: bool,
+    pub bg: bool,
 }
 
 impl Polynomio {
-    pub fn new(coods: Vec<Point>, color: RGB) -> Self {
+    pub fn new(coods: Vec<Point>, color: RGB, bg: bool) -> Self {
         Polynomio {
             coods: coods.clone(),
             orig_coods: coods,
-            color: color,
+            color,
             fixed: false,
+            bg,
         }
     }
 
@@ -108,10 +112,10 @@ impl Polynomio {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, ConvertSaveload, Clone)]
 pub struct Player {
     pub id: i32,
-    pub polynomios: Vec<Entity>,
+    pub polynomios: EntityVec<Entity>,
     pub select: usize,
     pub fixed: Vec<bool>,
     pub color: RGB,
@@ -125,7 +129,7 @@ impl Player {
         let n = polynomios.len();
         return Player {
             id: id,
-            polynomios: polynomios,
+            polynomios: EntityVec::from_vec(polynomios),
             select: 0,
             fixed: vec![false; n],
             color: color,
@@ -140,4 +144,12 @@ impl Player {
 pub struct Rect {
     pub w: i32,
     pub h: i32,
+}
+
+#[derive(Component, ConvertSaveload, Clone)]
+pub struct SerializeHelper {
+    pub map: Map,
+    pub active_player_id: usize,
+    pub mode: Mode,
+    // pub players: EntityVec<Entity>,
 }

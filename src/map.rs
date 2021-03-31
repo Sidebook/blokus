@@ -9,7 +9,7 @@ pub const WALL: i32 = -2;
 const LINE_NEIGHBORS: [(i32, i32); 4] = [(-1, 0), (0, -1), (1, 0), (0, 1)];
 const EDGE_NEIGHBORS: [(i32, i32); 4] = [(-1, -1), (1, -1), (1, 1), (-1, 1)];
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Map {
     pub map: Vec<i32>,
     pub x: i32,
