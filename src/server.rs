@@ -1,4 +1,6 @@
+use actix::clock::Duration;
 use super::{Input, InputQueue};
+use actix::prelude::*;
 use actix::*;
 use actix_web::web::Data;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
@@ -8,6 +10,7 @@ use std::sync::Mutex;
 
 struct EchoSession {
     ism: Data<Mutex<InputQueue>>,
+    wsMonitor: Data<Addr<WebsocketSessionMonitor>>,
 }
 
 impl EchoSession {
@@ -19,7 +22,9 @@ impl EchoSession {
 impl Actor for EchoSession {
     type Context = ws::WebsocketContext<Self>;
 
-    fn started(&mut self, _ctx: &mut Self::Context) {}
+    fn started(&mut self, _ctx: &mut Self::Context) {
+        self.wsMonitor.get_ref().do_send(WebSocketClientRegister {address: _ctx.address()})
+    }
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
         Running::Stop
     }
@@ -91,20 +96,75 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for EchoSession {
     }
 }
 
+impl Handler<ExampleMessage> for EchoSession {
+    type Result = ();
+
+    fn handle(&mut self, msg: ExampleMessage, ctx: &mut Self::Context) {
+        ctx.text(msg.text);
+    }
+}
+
+struct WebsocketSessionMonitor {
+    addresses: Vec<Addr<EchoSession>>,
+}
+
+#[derive(Message)]
+#[rtype(result = "WebSocketClientRegistration")]
+struct WebSocketClientRegister {
+    address: Addr<EchoSession>,
+}
+
+#[derive(MessageResponse)]
+struct WebSocketClientRegistration;
+
+#[derive(Message)]
+#[rtype(result = "")]
+struct ExampleMessage {
+    text: String,
+}
+
+impl Actor for WebsocketSessionMonitor {
+    type Context = Context<Self>;
+
+    fn started(& mut self, ctx: &mut Self::Context) {
+        // ctx.run_interval(Duration::from_secs(5), |act, _| {
+        //     for addr in &act.addresses {
+        //         addr.do_send(ExampleMessage {text: String::from("hogehoge")});
+        //     }
+        // });
+    }
+}
+
+impl Handler<WebSocketClientRegister> for WebsocketSessionMonitor {
+    type Result = WebSocketClientRegistration;
+
+    fn handle(&mut self, register: WebSocketClientRegister, _: &mut Self::Context) -> WebSocketClientRegistration {
+        self.addresses.push(register.address);
+        println!("Added address {}", self.addresses.len());
+        WebSocketClientRegistration {}
+    }
+}
+
 async fn echo_route(
     req: HttpRequest,
     stream: web::Payload,
     ism_data: Data<Mutex<InputQueue>>,
+    wsMonitor: Data<Addr<WebsocketSessionMonitor>>
 ) -> Result<HttpResponse, Error> {
-    ws::start(EchoSession { ism: ism_data }, &req, stream)
+    let session = EchoSession { ism: ism_data, wsMonitor: wsMonitor};
+    ws::start(session, &req, stream)
 }
 
 #[actix_rt::main]
 pub async fn start(ism: Data<Mutex<InputQueue>>) -> std::io::Result<()> {
+
+    let wsMonitor = WebsocketSessionMonitor { addresses: vec![] }.start();
+
     HttpServer::new(move || {
         App::new()
             .service(web::resource("/ws/").to(echo_route))
             .app_data(ism.clone())
+            .app_data(wsMonitor.clone())
     })
     .bind("0.0.0.0:8080")?
     .run();

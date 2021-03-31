@@ -238,6 +238,10 @@ impl GameState for ClientState {
             println!("Sending: {}", message);
             self.client.send_message(&Message::text(message)).unwrap();
         });
+        for message in self.client.incoming_messages() {
+            let message = message.unwrap();
+            println!("Recv: {:?}", message);
+        }
     }
 }
 
