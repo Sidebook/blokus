@@ -1,24 +1,131 @@
+use crate::ClientMessage;
 use super::{Input, InputQueue};
 use actix::prelude::*;
 use actix_web::web::Data;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
-use regex::Regex;
 use std::sync::Arc;
 use std::sync::Mutex;
+use serde::{Serialize, Deserialize};
+use serde_json;
 
-struct EchoSession {
-    ism: Data<Mutex<InputQueue>>,
-    ws_monitor: Data<Addr<WebsocketSessionMonitor>>,
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub enum ServerMessage {
+    Sync { serialized_data: String },
+    Reject { reason: String },
 }
 
-impl EchoSession {
-    fn push_input(&mut self, player_id: i32, i: Input) {
-        self.ism.lock().unwrap().push(player_id, i);
+#[derive(Message, Clone)]
+#[rtype(result = "()")]
+pub struct ArcServerMessage {
+    pub message: Arc<ServerMessage>
+}
+
+#[derive(Clone)]
+pub struct PlayerSlot {
+    pub id: usize,
+    pub name: String,
+}
+
+pub struct PlayerSlotManager {
+    slots: Vec<Option<PlayerSlot>>,
+}
+
+#[derive(Debug)]
+pub enum SlotRequestError {
+    IndexOutOfRange,
+    AlreadyExists,
+}
+
+impl PlayerSlotManager {
+    pub fn new(n: usize) -> Self {
+        PlayerSlotManager {
+            slots: vec![None; n],
+        }
+    }
+
+    pub fn request(&mut self, slot: PlayerSlot) -> Result<(), SlotRequestError> {
+        let id = slot.id;
+        if self.slots.len() <= id {
+            return Err(SlotRequestError::IndexOutOfRange);
+        }
+        if let Some(_) = self.slots[id] {
+            return Err(SlotRequestError::AlreadyExists);
+        }
+
+        self.slots[id] = Some(slot);
+        Ok(())
+    }
+
+    pub fn get<'a>(&'a mut self, id: usize) -> Option<&'a PlayerSlot>{
+        self.slots[id].as_ref()
+    }
+
+    pub fn remove(&mut self, id: usize) {
+        self.slots[id] = None;
     }
 }
 
-impl Actor for EchoSession {
+struct WebSocketSession {
+    ism: Data<Mutex<InputQueue>>,
+    slot_manager: Data<Mutex<PlayerSlotManager>>,
+    ws_monitor: Data<Addr<WebsocketSessionMonitor>>,
+    slot: Option<PlayerSlot>,
+}
+
+impl WebSocketSession {
+    fn push_input(&mut self, player_id: i32, i: Input) {
+        self.ism.lock().unwrap().push(player_id, i);
+    }
+
+    fn reject(&self, ctx: &mut actix_web_actors::ws::WebsocketContext<WebSocketSession>, reason: String) {
+        ctx.text(serde_json::to_string(&ServerMessage::Reject{ reason })
+                .expect("Faield to serialize the Reject server message."));
+    }
+
+    fn handle_client_message(
+        &mut self,
+        ctx: &mut actix_web_actors::ws::WebsocketContext<WebSocketSession>,
+        message: &ClientMessage) {
+        match message {
+            ClientMessage::Sit { player_id, name } => {
+                println!("Playner ({}) sat the chair #{}", name, player_id);
+                let slot = PlayerSlot {
+                    id: *player_id as usize,
+                    name: String::from(name),
+                };
+                let slot_request = self.slot_manager.lock().unwrap().request(slot.clone());
+                match slot_request {
+                    Err(SlotRequestError::AlreadyExists) => {
+                        self.reject(ctx, format!("slot #{} is already occupied.", player_id));
+                    },
+                    Err(SlotRequestError::IndexOutOfRange) => {
+                        self.reject(ctx, format!("slot #{} is out of range.", player_id));
+                    },
+                    Ok(()) => {
+                        self.slot = Some(slot);
+                    }
+                }
+            }
+            ClientMessage::Sync { } => {
+                if let Some(_) = &self.slot {
+                    self.push_input(self.slot.as_ref().unwrap().id as i32, Input::RequestBroadcast);
+                } else {
+                    self.reject(ctx, format!("No slot assigned."));
+                }
+            }
+            ClientMessage::Input { input } => {
+                if let Some(_) = &self.slot {
+                    self.push_input(self.slot.as_ref().unwrap().id as i32, input.clone());
+                } else {
+                    self.reject(ctx, format!("No slot assigned."));
+                }
+            }
+        }
+    }
+}
+
+impl Actor for WebSocketSession {
     type Context = ws::WebsocketContext<Self>;
 
     fn started(&mut self, _ctx: &mut Self::Context) {
@@ -31,11 +138,15 @@ impl Actor for EchoSession {
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
+        println!("Stopping Websocket Session");
+        if let Some(slot) = &self.slot {
+            self.slot_manager.lock().unwrap().remove(slot.id);
+        }
         Running::Stop
     }
 }
 
-impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for EchoSession {
+impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WebSocketSession {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         let msg = match msg {
             Err(_) => {
@@ -48,46 +159,9 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for EchoSession {
             ws::Message::Ping(_) => {}
             ws::Message::Pong(_) => {}
             ws::Message::Text(text) => {
-                // ctx.text(&format!["Got {}", text]);
-                let reg = Regex::new(r"([^\s]+)").unwrap();
-                let mut caps = reg.find_iter(&text);
-                let player_id = match caps.next() {
-                    Some(pid_match) => pid_match.as_str().parse::<i32>().unwrap_or(-1),
-                    None => -1,
-                };
-                if player_id == -1 {
-                    ctx.text(format![
-                        "Invalid request: Player ID is not defined {}",
-                        &text
-                    ]);
-                    return;
-                }
-
-                match caps.next() {
-                    Some(command) => match command.as_str() {
-                        "RequestBroadcast" => self.push_input(player_id, Input::RequestBroadcast),
-                        "Left" => self.push_input(player_id, Input::Left),
-                        "Right" => self.push_input(player_id, Input::Right),
-                        "Up" => self.push_input(player_id, Input::Up),
-                        "Down" => self.push_input(player_id, Input::Down),
-                        "RotateRight" => self.push_input(player_id, Input::RotateRight),
-                        "RotateLeft" => self.push_input(player_id, Input::RotateLeft),
-                        "Flip" => self.push_input(player_id, Input::Flip),
-                        "GiveUp" => self.push_input(player_id, Input::GiveUp),
-                        "Cancel" => self.push_input(player_id, Input::Cancel),
-                        "Enter" => self.push_input(player_id, Input::Enter),
-                        _ => {
-                            ctx.text(format![
-                                "Invalid request: unknown command {}",
-                                command.as_str()
-                            ]);
-                        }
-                    },
-                    None => ctx.text(format!["Invalid request: no command"]),
-                }
-                // }
-                // caps.at(1).unwrap()
-                // self.ism.lock().unwrap().push(1, Input::Down);
+                let message = serde_json::from_str::<ClientMessage>(&text)
+                    .expect("Failed to deserialize the client message.");
+                self.handle_client_message(ctx, &message);
             }
             ws::Message::Binary(_) => println!("Unexpected binary"),
             ws::Message::Close(reason) => {
@@ -102,36 +176,29 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for EchoSession {
     }
 }
 
-impl Handler<BroadCast> for EchoSession {
+impl Handler<ArcServerMessage> for WebSocketSession {
     type Result = ();
-
-    fn handle(&mut self, msg: BroadCast, ctx: &mut Self::Context) {
-        println!("Processing Broadcast event...");
-        ctx.text(format!["{}", msg.content]);
+    
+    fn handle(&mut self, msg: ArcServerMessage, ctx: &mut Self::Context) {
+        let serialized = &serde_json::to_string(&*msg.message).expect("Failed to serialize the server message.");
+        ctx.text(serialized);
     }
 }
 
 #[derive(Clone)]
 pub struct WebsocketSessionMonitor {
-    addresses: Vec<Addr<EchoSession>>,
+    addresses: Vec<Addr<WebSocketSession>>,
     broadcast: Data<Mutex<BroadCastTarget>>,
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
 struct WebSocketClientRegister {
-    address: Addr<EchoSession>,
+    address: Addr<WebSocketSession>,
 }
 
 #[derive(MessageResponse)]
 struct WebSocketClientRegistration;
-
-#[derive(Message)]
-#[rtype(resut = "()")]
-#[derive(Clone)]
-pub struct BroadCast {
-    pub content: Arc<String>,
-}
 
 impl Actor for WebsocketSessionMonitor {
     type Context = Context<Self>;
@@ -155,15 +222,15 @@ impl Handler<WebSocketClientRegister> for WebsocketSessionMonitor {
     }
 }
 
-impl Handler<BroadCast> for WebsocketSessionMonitor {
+impl Handler<ArcServerMessage> for WebsocketSessionMonitor {
     type Result = ();
 
-    fn handle(&mut self, broadcast: BroadCast, _: &mut Self::Context) {
+    fn handle(&mut self, message: ArcServerMessage, _: &mut Self::Context) {
         println!("Handling Broadcast event...");
         println!("Will send to {} sessions", self.addresses.len());
         for addr in self.addresses.iter() {
             println!("Sending broadcast to session");
-            addr.do_send(broadcast.clone());
+            addr.do_send(message.clone());
         }
     }
 }
@@ -173,11 +240,14 @@ async fn echo_route(
     stream: web::Payload,
     ism_data: Data<Mutex<InputQueue>>,
     ws_monitor: Data<Addr<WebsocketSessionMonitor>>,
+    slot_manager: Data<Mutex<PlayerSlotManager>>,
 ) -> Result<HttpResponse, Error> {
     println!("Connected from {:?}", req.peer_addr().unwrap());
-    let session = EchoSession {
+    let session = WebSocketSession {
         ism: ism_data,
-        ws_monitor: ws_monitor,
+        slot_manager,
+        ws_monitor,
+        slot: None,
     };
     ws::start(session, &req, stream)
 }
@@ -190,6 +260,7 @@ pub struct BroadCastTarget {
 pub async fn start(
     ism: Data<Mutex<InputQueue>>,
     broadcast: Data<Mutex<BroadCastTarget>>,
+    slot_manager: Data<Mutex<PlayerSlotManager>>,
 ) -> std::io::Result<()> {
     let ws_monitor_addr = WebsocketSessionMonitor {
         addresses: vec![],
@@ -200,6 +271,7 @@ pub async fn start(
         App::new()
             .service(web::resource("/ws/").to(echo_route))
             .app_data(ism.clone())
+            .app_data(slot_manager.clone())
             .app_data(Data::new(ws_monitor_addr.clone()))
     })
     .bind("0.0.0.0:8080")?

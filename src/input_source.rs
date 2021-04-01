@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
+use serde::{Serialize, Deserialize};
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Input {
     RequestBroadcast,
     Left,

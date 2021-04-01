@@ -1,3 +1,6 @@
+use crate::PlayerSlotManager;
+use std::sync::Mutex;
+use actix_web::web::Data;
 use crate::Mode;
 use specs::prelude::*;
 
@@ -5,7 +8,7 @@ use super::{Map, Player, Polynomio, Position, Rect, EMPTY, WALL};
 use rltk::{Rltk, RGB};
 
 
-pub fn render(ecs: &World, ctx: &mut Rltk) {
+pub fn render(ecs: &World, ctx: &mut Rltk, slot_manager: Option<Data<Mutex<PlayerSlotManager>>>) {
     ctx.cls();
 
     let mode = *ecs.fetch::<Mode>();
@@ -26,7 +29,7 @@ pub fn render(ecs: &World, ctx: &mut Rltk) {
     }
 
     draw_map(ecs, ctx);
-    draw_uis(&ecs, ctx);
+    draw_uis(&ecs, ctx, slot_manager);
     
     draw_polynomios(&ecs, ctx, mode, true);
     draw_polynomios(&ecs, ctx, mode, false);
@@ -172,23 +175,34 @@ pub fn draw_rect(ctx: &mut Rltk, position: &Position, rect: &Rect) {
 }
 
 
-pub fn draw_uis(ecs: &World, ctx: &mut Rltk) {
+pub fn draw_uis(ecs: &World, ctx: &mut Rltk, slot_manager: Option<Data<Mutex<PlayerSlotManager>>>) {
     let positions = ecs.read_storage::<Position>();
     let players = ecs.read_storage::<Player>();
     let active_player_id = ecs.fetch::<usize>();
 
     for (pos, player) in (&positions, &players).join() {
-        draw_ui(ctx, pos, player, *active_player_id);
+        draw_ui(ctx, pos, player, *active_player_id, slot_manager.clone());
     }
 }
 
-pub fn draw_ui(ctx: &mut Rltk, position: &Position, player: &Player, active_player_id: usize) {
-    let player_str = if player.end {
-        format!["Player #{} (Finished)", &(player.id + 1)]
-    } else if player.id as usize == active_player_id {
-        format!["Player #{} <= Your turn", &(player.id + 1)]
+pub fn draw_ui(ctx: &mut Rltk, position: &Position, player: &Player, active_player_id: usize, slot_manager: Option<Data<Mutex<PlayerSlotManager>>>) {
+
+    let player_name = if let Some(slot_manager) = slot_manager {
+        if let Some(slot) = slot_manager.lock().unwrap().get(player.id as usize) {
+            format!("{}", slot.name.clone())
+        } else {
+            format!("Player #{} (Not connected)", player.id + 1)
+        }
     } else {
-        format!["Player #{}", &(player.id + 1)]
+        format!("Player #{}", player.id + 1)
+    };
+
+    let player_str = if player.end {
+        format!["{} (Finished)", player_name]
+    } else if player.id as usize == active_player_id {
+        format!["{} <= Your turn", player_name]
+    } else {
+        format!["{}", player_name]
     };
 
     let stats = &format!["remaining: {} (#{})", player.remaining_tiles, player.rank];

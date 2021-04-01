@@ -1,8 +1,8 @@
-use crate::server::BroadCast;
+use crate::server::ArcServerMessage;
 use std::collections::VecDeque;
 
 pub struct BroadCastQueue {
-    queue: VecDeque<BroadCast>,
+    queue: VecDeque<ArcServerMessage>,
 }
 
 impl BroadCastQueue {
@@ -12,18 +12,18 @@ impl BroadCastQueue {
         }
     }
 
-    pub fn push(&mut self, broadcast: BroadCast) {
+    pub fn push(&mut self, broadcast: ArcServerMessage) {
         self.queue.push_back(broadcast);
     }
 
-    pub fn pop(&mut self) -> Option<BroadCast> {
+    pub fn pop(&mut self) -> Option<ArcServerMessage> {
         self.queue.pop_front()
     }
 }
 
 impl Iterator for BroadCastQueue {
-    type Item = BroadCast;
-    fn next(&mut self) -> Option<BroadCast> {
+    type Item = ArcServerMessage;
+    fn next(&mut self) -> Option<ArcServerMessage> {
         self.pop()
     }
 }
