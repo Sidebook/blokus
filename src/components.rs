@@ -122,10 +122,11 @@ pub struct Player {
     pub end: bool,
     pub rank: i32,
     pub remaining_tiles: i32,
+    pub name: Option<String>,
 }
 
 impl Player {
-    pub fn new(id: i32, polynomios: Vec<Entity>, color: RGB) -> Self {
+    pub fn new(id: i32, polynomios: Vec<Entity>, color: RGB, name: Option<String>) -> Self {
         let n = polynomios.len();
         return Player {
             id: id,
@@ -136,6 +137,7 @@ impl Player {
             end: false,
             rank: 0,
             remaining_tiles: 0,
+            name: name,
         };
     }
 }

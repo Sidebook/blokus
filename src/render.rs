@@ -22,7 +22,15 @@ pub fn render(ecs: &World, ctx: &mut Rltk, slot_manager: Option<Data<Mutex<Playe
             "Left/Right/Up/Down: Move a piece  Enter: Put  Num0: Give up".to_string(),
             "R: Rotate right  E: Rotate left  F: Flip  Esc: Cancel".to_string(),
         ],
-        Mode::Finish => vec![format!["Player ??? won!"]],
+        Mode::Finish => {
+            let entities = ecs.entities();
+            let players = ecs.read_storage::<Player>();
+            let winner = (&entities, &players).join().filter(|(_, player)| player.rank == 1).next().unwrap().1;
+            match &winner.name {
+                Some(name) => vec![format!["{} won!", name]],
+                None => vec![format!["Player #{} won!", winner.id + 1]],
+            }
+        },
     };
     for (i, dialog) in dialogs.iter().enumerate() {
         ctx.print(5, i * 2 + 60, dialog);
@@ -188,13 +196,21 @@ pub fn draw_uis(ecs: &World, ctx: &mut Rltk, slot_manager: Option<Data<Mutex<Pla
 pub fn draw_ui(ctx: &mut Rltk, position: &Position, player: &Player, active_player_id: usize, slot_manager: Option<Data<Mutex<PlayerSlotManager>>>) {
 
     let player_name = if let Some(slot_manager) = slot_manager {
-        if let Some(slot) = slot_manager.lock().unwrap().get(player.id as usize) {
-            format!("{}", slot.name.clone())
-        } else {
-            format!("Player #{} (Not connected)", player.id + 1)
+        match &player.name {
+            Some(name) => name.clone(),
+            None => {
+                if let Some(_) = slot_manager.lock().unwrap().get(player.id as usize) {
+                    format!("Anonymous")
+                } else {
+                    format!("Player #{} (Not Connected)", player.id + 1)
+                }
+            }
         }
     } else {
-        format!("Player #{}", player.id + 1)
+        match &player.name {
+            Some(name) => name.clone(),
+            None => format!("Player #{}", player.id + 1),
+        }
     };
 
     let player_str = if player.end {

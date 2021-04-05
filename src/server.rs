@@ -29,6 +29,7 @@ pub struct PlayerSlot {
 
 pub struct PlayerSlotManager {
     slots: Vec<Option<PlayerSlot>>,
+    updated: bool,
 }
 
 #[derive(Debug)]
@@ -41,6 +42,7 @@ impl PlayerSlotManager {
     pub fn new(n: usize) -> Self {
         PlayerSlotManager {
             slots: vec![None; n],
+            updated: false,
         }
     }
 
@@ -54,6 +56,7 @@ impl PlayerSlotManager {
         }
 
         self.slots[id] = Some(slot);
+        self.updated = true;
         Ok(())
     }
 
@@ -63,6 +66,17 @@ impl PlayerSlotManager {
 
     pub fn remove(&mut self, id: usize) {
         self.slots[id] = None;
+        self.updated = true;
+    }
+
+    pub fn consume_updated(&mut self) -> bool {
+        let updated = self.updated;
+        self.updated = false;
+        updated
+    }
+
+    pub fn len(& self) -> usize {
+        self.slots.len()
     }
 }
 

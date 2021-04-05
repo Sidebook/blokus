@@ -91,6 +91,7 @@ impl State {
         match game_mode {
             "normal" => state.prepare_4players_game(),
             "duo" => state.prepare_2players_game(),
+            "debug" => state.prepare_game_small(),
             _ => {}
         };
 
@@ -158,6 +159,20 @@ pub enum Mode {
 
 impl GameState for State {
     fn tick(&mut self, ctx: &mut Rltk) {
+        if let Some(slot_maneger) = &self.slot_manager {
+            let mut sm = slot_maneger.lock().unwrap();
+            if sm.consume_updated() {
+                let mut players = self.ecs.write_storage::<Player>();
+                let entities = self.ecs.entities();
+                for (_, player) in (&entities, & mut players).join() {
+                    if let Some(slot) = sm.get(player.id as usize) {
+                        player.name = Some(slot.name.clone())
+                    } else {
+                        player.name = None
+                    }
+                }
+            }
+        }
 
         let mut newmode = player_input(self, ctx);
         if self.is_finished() {
@@ -268,7 +283,7 @@ fn main() -> rltk::BError {
                 .short("m")
                 .long("mode")
                 .help("Game mode. 'normal': 4-players game 'duo': 2-players game")
-                .possible_values(&["normal", "duo"])
+                .possible_values(&["normal", "duo", "debug"])
                 .takes_value(true),
         )
         .arg(
@@ -302,6 +317,18 @@ fn main() -> rltk::BError {
 
     let game_mode = matches.value_of("mode").unwrap_or("normal");
     let name = matches.value_of("name").unwrap_or("Anonymous");
+
+    if name.len() <= 0 || name.len() > 30 {
+        eprintln!("[ERROR] The length of the name must be greater than 1 and less than 31");
+        std::process::exit(1);
+    }
+
+    let valid_name_pattern = regex::Regex::new(r"^[A-z_\-#@$%*,]+$").unwrap();
+    if !valid_name_pattern.is_match(name) {
+        eprintln!("[ERROR] The name must match ^[A-z_-#@$%*,]+$");
+        std::process::exit(1);
+    }
+
 
     use rltk::RltkBuilder;
     let context = RltkBuilder::simple(72, 64)?.with_title("Blokus").build()?;
@@ -451,13 +478,22 @@ impl State {
     fn prepare_game_small(&mut self) {
         let players = vec![
             self.prepare_player_small(0, 5, 2, RGB::from_f32(1.0, 0.25, 0.2)),
-            self.prepare_player_small(1, 5, 10, RGB::from_f32(0.2, 1.0, 0.2)),
-            self.prepare_player_small(2, 5, 44, RGB::from_f32(1.0, 0.9, 0.2)),
-            self.prepare_player_small(3, 5, 52, RGB::from_f32(0.2, 0.7, 1.0)),
+            self.prepare_player_small(1, 5, 44, RGB::from_f32(1.0, 0.9, 0.2)),
         ];
 
+        let mut map = Map::new(27, 20, 7, 7);
+        {
+            let players_store = self.ecs.read_storage::<Player>();
+            let player_comps: Vec<&Player> = players
+                .iter()
+                .map(|e| players_store.get(*e).unwrap())
+                .collect();
+            map.bind(player_comps[0], 1, 1);
+            map.bind(player_comps[1], 5, 5);
+        }
+
         self.ecs.insert(players);
-        self.ecs.insert(Map::new(27, 20, 7, 7));
+        self.ecs.insert(map);
         self.ecs.insert(0 as usize);
         self.ecs.insert(Mode::Initialize);
     }
@@ -618,7 +654,7 @@ impl State {
         let player = self
             .ecs
             .create_entity()
-            .with(Player::new(id, ps, color))
+            .with(Player::new(id, ps, color, None))
             .with(Position::new(x, y))
             .marked::<SimpleMarker<SyncOnline>>()
             .build();
@@ -637,12 +673,12 @@ impl State {
             color,
         ));
 
-        ps.push(self.prepare_polynomio(x + 65, y + 2 + YOFF, &[(0, 0)], color));
+        ps.push(self.prepare_polynomio(x + 5, y + 2 + YOFF, &[(0, 0)], color));
 
         let player = self
             .ecs
             .create_entity()
-            .with(Player::new(id, ps, color))
+            .with(Player::new(id, ps, color, None))
             .with(Position::new(x, y))
             .marked::<SimpleMarker<SyncOnline>>()
             .build();
