@@ -23,12 +23,11 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(url: String, player_id: i32, player_name: String) -> Self {
+    pub fn new(url: String, player_id: i32, player_name: String) -> Result<Self, websocket::WebSocketError> {
         let msg_queue = Arc::new(Mutex::new(VecDeque::new()));
         let client = ClientBuilder::new(&url)
             .unwrap()
-            .connect_insecure()
-            .unwrap();
+            .connect_insecure()?;
 
         let (mut receiver, sender) = client.split().unwrap();
 
@@ -53,12 +52,12 @@ impl Client {
             }
         });
 
-        Client {
+        Ok(Client {
             player_id,
             player_name,
             websocket_sender: sender,
             message_queue: msg_queue,
-        }
+        })
     }
 
     pub fn has_next(&self) -> bool {

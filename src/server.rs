@@ -152,7 +152,6 @@ impl Actor for WebSocketSession {
     }
 
     fn stopping(&mut self, _ctx: &mut Self::Context) -> Running {
-        println!("Stopping Websocket Session");
         if let Some(slot) = &self.slot {
             self.slot_manager.lock().unwrap().remove(slot.id);
         }
@@ -218,12 +217,7 @@ impl Actor for WebsocketSessionMonitor {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        println!("Started WebSocketSessionMonitor");
         self.broadcast.lock().unwrap().addr = Some(ctx.address());
-    }
-
-    fn stopped(&mut self, _ctx: &mut Self::Context) {
-        println!("Stopped WebSocketSessionMonitor");
     }
 }
 
@@ -231,7 +225,6 @@ impl Handler<WebSocketClientRegister> for WebsocketSessionMonitor {
     type Result = ();
 
     fn handle(&mut self, register: WebSocketClientRegister, _: &mut Self::Context) {
-        println!("Adding websocket session to monitor");
         self.addresses.push(register.address);
     }
 }
@@ -240,10 +233,7 @@ impl Handler<ArcServerMessage> for WebsocketSessionMonitor {
     type Result = ();
 
     fn handle(&mut self, message: ArcServerMessage, _: &mut Self::Context) {
-        println!("Handling Broadcast event...");
-        println!("Will send to {} sessions", self.addresses.len());
         for addr in self.addresses.iter() {
-            println!("Sending broadcast to session");
             addr.do_send(message.clone());
         }
     }
@@ -283,7 +273,7 @@ pub async fn start(
     .start();
     HttpServer::new(move || {
         App::new()
-            .service(web::resource("/ws/").to(echo_route))
+            .service(web::resource("/play/").to(echo_route))
             .app_data(ism.clone())
             .app_data(slot_manager.clone())
             .app_data(Data::new(ws_monitor_addr.clone()))

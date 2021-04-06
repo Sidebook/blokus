@@ -234,7 +234,14 @@ impl ClientState {
         ecs.insert(0 as usize);
         ecs.insert(Mode::Initialize);
 
-        let mut client = Client::new(url.clone(), player_id, player_name.clone());
+        let client = Client::new(url.clone(), player_id, player_name.clone());
+
+        if let Err(err) = client {
+            eprintln!("[ERROR] Failed to connect the server (\"{}\"): {:?}", url.clone(), err);
+            std::process::exit(1);
+        }
+
+        let mut client = client.unwrap();
 
         client.send_sit();
         client.send_sync();
