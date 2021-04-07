@@ -242,6 +242,7 @@ pub struct ClientState {
     pub rnd: ThreadRng,
     pub latest_token: i32,
     pub locked: bool,
+    pub connecting: bool,
 }
 
 impl ClientState {
@@ -286,6 +287,7 @@ impl ClientState {
             rnd: thread_rng(),
             latest_token: 0,
             locked: false,
+            connecting: true,
         }
     }
 }
@@ -319,6 +321,7 @@ impl GameState for ClientState {
                     serialized_data,
                     trigger,
                 } => {
+                    self.connecting = false;
                     if trigger.player_id != self.player_id
                         || trigger.input == Input::RequestBroadcast
                         || trigger.token == Some(self.latest_token)
@@ -337,7 +340,11 @@ impl GameState for ClientState {
             None => {}
         }
 
-        render(&self.ecs, ctx, None);
+        if self.connecting {
+            ctx.print(5, 5, format!("Connecting to {:?} ...", self.url));
+        } else {
+            render(&self.ecs, ctx, None);
+        }
     }
 }
 
