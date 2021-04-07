@@ -566,6 +566,7 @@ dependencies = [
  "actix-web",
  "actix-web-actors",
  "clap",
+ "rand 0.6.5",
  "regex",
  "rltk",
  "serde",

@@ -12,7 +12,7 @@ use crate::Input;
 pub enum ClientMessage {
     Sit { player_id: i32, name: String },
     Sync,
-    Input { input: Input },
+    Input { input: Input, token: i32 },
 }
 
 pub struct Client {
@@ -82,7 +82,7 @@ impl Client {
                 }
                 formatted
             };
-            println!("Got {}", truncated);
+            println!("Got a message: {}", truncated);
             Some(message)
         }
     }
@@ -103,8 +103,8 @@ impl Client {
         });
     }
 
-    pub fn send_input(&mut self, input: Input) {
-        self.send(&ClientMessage::Input{ input });
+    pub fn send_input(&mut self, input: Input, token: i32) {
+        self.send(&ClientMessage::Input{ input, token });
     }
 
     pub fn send_sync(&mut self) {

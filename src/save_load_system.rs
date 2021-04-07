@@ -115,8 +115,11 @@ pub fn load_game(ecs: &mut World, data: &str) {
         }
 
         let mut player_entities = ecs.fetch_mut::<Vec<Entity>>();
-        *player_entities = (&entities, &players).join().map(|(e, _)| e).collect::<Vec<Entity>>();
-        
+        let mut player_entity_vec = (&entities, &players).join()
+            .collect::<Vec<(Entity, &Player)>>();
+        player_entity_vec.sort_by(|a, b| (a.1.id).cmp(&b.1.id));
+        *player_entities = player_entity_vec.iter().map(|(e, _)| *e).collect::<Vec<Entity>>();
+
         // for (e,h) in (&entities, &helper).join() {
         //     let mut worldmap = ecs.write_resource::<super::map::Map>();
         //     *worldmap = h.map.clone();

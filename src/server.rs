@@ -1,3 +1,4 @@
+use crate::UserInput;
 use crate::ClientMessage;
 use super::{Input, InputQueue};
 use actix::prelude::*;
@@ -11,7 +12,7 @@ use serde_json;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum ServerMessage {
-    Sync { serialized_data: String },
+    Sync { serialized_data: String, trigger: UserInput },
     Reject { reason: String },
 }
 
@@ -88,8 +89,8 @@ struct WebSocketSession {
 }
 
 impl WebSocketSession {
-    fn push_input(&mut self, player_id: i32, i: Input) {
-        self.ism.lock().unwrap().push(player_id, i);
+    fn push_input(&mut self, user_input: UserInput) {
+        self.ism.lock().unwrap().push(user_input);
     }
 
     fn reject(&self, ctx: &mut actix_web_actors::ws::WebsocketContext<WebSocketSession>, reason: String) {
@@ -103,7 +104,7 @@ impl WebSocketSession {
         message: &ClientMessage) {
         match message {
             ClientMessage::Sit { player_id, name } => {
-                println!("Playner ({}) sat the chair #{}", name, player_id);
+                println!("Player ({}) sat the chair #{}", name, player_id);
                 let slot = PlayerSlot {
                     id: *player_id as usize,
                     name: String::from(name),
@@ -123,14 +124,23 @@ impl WebSocketSession {
             }
             ClientMessage::Sync { } => {
                 if let Some(_) = &self.slot {
-                    self.push_input(self.slot.as_ref().unwrap().id as i32, Input::RequestBroadcast);
+                    self.push_input(
+                        UserInput {
+                            player_id: self.slot.as_ref().unwrap().id as i32,
+                            input: Input::RequestBroadcast,
+                            token: None,
+                        });
                 } else {
                     self.reject(ctx, format!("No slot assigned."));
                 }
             }
-            ClientMessage::Input { input } => {
+            ClientMessage::Input { input, token } => {
                 if let Some(_) = &self.slot {
-                    self.push_input(self.slot.as_ref().unwrap().id as i32, input.clone());
+                    self.push_input(UserInput {
+                        player_id: self.slot.as_ref().unwrap().id as i32,
+                        input: input.clone(),
+                        token: Some(*token),
+                    });
                 } else {
                     self.reject(ctx, format!("No slot assigned."));
                 }

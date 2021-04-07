@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use specs::saveload::{SimpleMarker, SimpleMarkerAllocator, MarkedBuilder};
 use serde::{Serialize, Deserialize};
+use rand::prelude::*;
 
 mod components;
 pub use components::*;
@@ -98,13 +99,12 @@ impl State {
         state
     }
 
-    pub fn push_input(&mut self, player_id: i32, i: Input) {
-        self.ism.lock().unwrap().push(player_id, i);
+    pub fn push_input(&mut self, user_input: UserInput) {
+        self.ism.lock().unwrap().push(user_input);
     }
 
-    pub fn pop_for(&mut self, player_id: i32) -> Option<Input> {
-        let mut input_queue = self.ism.lock().unwrap();
-        input_queue.pop_for(player_id)
+    pub fn pop_input(&mut self) -> Option<UserInput> {
+        self.ism.lock().unwrap().pop()
     }
 
     pub fn push_event(&mut self, event: Box<dyn Event>) {
@@ -120,31 +120,16 @@ impl State {
         }
     }
 
-    pub fn broadcast(&mut self) {
+    pub fn broadcast(&mut self, trigger: UserInput) {
         if let Some(broadcast) = &self.broadcast {
             if let Some(addr) = &broadcast.lock().unwrap().addr {
                 addr.try_send(ArcServerMessage{
                     message: Arc::new(ServerMessage::Sync{
-                        serialized_data: dump_game(&mut self.ecs)
+                        serialized_data: dump_game(&mut self.ecs),
+                        trigger,
                     })})
                 .expect("Failed to broadcast");
             }
-        }
-    }
-
-    pub fn request_broadcast(&mut self) {
-        self.pending_broadcast = true;
-    }
-
-    pub fn consume_broadcast(&mut self) {
-        let broadcast_request_from_clients = {
-            let mut input_queue = self.ism.lock().unwrap();
-            input_queue.consume_broadcast()
-        };
-
-        if self.pending_broadcast || broadcast_request_from_clients{
-            self.broadcast();
-            self.pending_broadcast = false;
         }
     }
 }
@@ -174,46 +159,81 @@ impl GameState for State {
             }
         }
 
-        let mut newmode = player_input(self, ctx);
-        if self.is_finished() {
-            newmode = Mode::Finish;
+        let initializing = {
+            let mut mode = self.ecs.write_resource::<Mode>();
+            if *mode == Mode::Initialize {
+                *mode = Mode::Select;
+                true
+            } else { false }
+        };
+
+        if initializing {
+            let mut stats = StatsCollectSystem { winner: 0 };
+            stats.run_now(&self.ecs);
+            render(&self.ecs, ctx, self.slot_manager.clone());
+        }
+
+        let active_player_id = *self.ecs.read_resource::<usize>() as i32;
+
+        let host_player_id = if self.use_local_input {active_player_id} else {self.my_player_id};
+        map_virtual_key_code(ctx.key).map(|i| self.push_input(
+            UserInput {
+                player_id: host_player_id,
+                input: i,
+                token: Some(0),
+            }
+        ));
+
+        let mut input_result: InputResult = InputResult::Noop;
+
+        loop {
+            let user_input = self.pop_input();
+            if let Some(user_input) = user_input {
+                println!("Input: {:?}", user_input);
+                input_result = player_input(self, user_input);
+                println!("  --> {:?}", input_result);
+                match input_result.clone() {
+                    InputResult::Updated {..} => {input_result = input_result},
+                    InputResult::Noop => { continue; }
+                }
+            }
+            break;
         }
 
         let mut polynomio_indexing_system = PolynomioIndexingSystem {};
         polynomio_indexing_system.run_now(&self.ecs);
 
-        let currentmode;
-        {
-            let mut mode = self.ecs.write_resource::<Mode>();
+        match input_result {
+            InputResult::Updated {newmode, trigger} => {
+                {
+                    let mut mode = self.ecs.write_resource::<Mode>();
+                    *mode = newmode;
+                }
 
-            self.winner = if *mode != newmode {
                 let mut stats = StatsCollectSystem { winner: 0 };
                 stats.run_now(&self.ecs);
-                stats.winner
-            } else {
-                self.winner
-            };
+                self.winner = stats.winner;
 
-            currentmode = *mode;
-            *mode = newmode;
+                render(&self.ecs, ctx, self.slot_manager.clone());
+
+                if let Some(trigger) = trigger {
+                    self.broadcast(trigger);
+                }
+            }
+            _ => {}
         }
-
-        if currentmode != newmode {
-            self.request_broadcast();
-        }
-
-        render(&self.ecs, ctx, self.slot_manager.clone());
-
-        self.consume_broadcast();
     }
 }
 
-struct ClientState {
+pub struct ClientState {
     pub ecs: World,
     pub url: String,
     pub player_id: i32,
     pub player_name: String,
     pub client: Client,
+    pub rnd: ThreadRng,
+    pub latest_token: i32,
+    pub locked: bool,
 }
 
 impl ClientState {
@@ -252,30 +272,50 @@ impl ClientState {
             player_id,
             player_name,
             client,
+            rnd: thread_rng(),
+            latest_token: 0,
+            locked: false,
         }
     }
 }
 
 impl GameState for ClientState {
     fn tick(&mut self, ctx: &mut rltk::Rltk) {
-        map_virtual_key_code(ctx.key).map(|i| {self.client.send_input(i)});
+        map_virtual_key_code(ctx.key).map(|i| {
+            if i != Input::Undo && !self.locked{
+                let token: i32 = self.rnd.gen();
+                self.latest_token = token;
+                self.client.send_input(i, token);
+            }
+        });
         
+        let newmode = player_input_client(self, ctx);
+        {
+            let mut mode = self.ecs.write_resource::<Mode>();
+            *mode = newmode
+        }
+
         match self.client.next_message() {
             Some(message) => match message {
                 ServerMessage::Reject { reason } => {
                     eprintln!("[ERROR] Rejected from the server: {:?}. Exiting ...", reason);
                     std::process::exit(1);
                 },
-                ServerMessage::Sync { serialized_data } => {
-                    load_game(&mut self.ecs, &serialized_data);
-                    println!("Received game update: mode: {:?}, apid: {:?}",
-                        *self.ecs.fetch::<Mode>(),
-                        *self.ecs.fetch::<usize>());
-                    render(&self.ecs, ctx, None);
+                ServerMessage::Sync { serialized_data, trigger } => {
+                    if trigger.player_id != self.player_id || trigger.input == Input::RequestBroadcast || trigger.token == Some(self.latest_token) {
+                        println!("Applying a game update...");
+                        load_game(&mut self.ecs, &serialized_data);
+                        println!("Applied the game update: mode: {:?}, apid: {:?}",
+                            *self.ecs.fetch::<Mode>(),
+                            *self.ecs.fetch::<usize>());
+                        self.locked = false;
+                    }
                 }
             }
             None => {}
         }
+
+        render(&self.ecs, ctx, None);
     }
 }
 

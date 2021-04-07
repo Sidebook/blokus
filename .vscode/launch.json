@@ -19,8 +19,11 @@
                     "kind": "bin"
                 }
             },
-            "args": ["host"],
-            "cwd": "${workspaceFolder}"
+            "args": ["play"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_BACKTRACE": "1",
+            }
         },
         {
             "type": "lldb",

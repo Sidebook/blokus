@@ -194,7 +194,6 @@ pub fn draw_uis(ecs: &World, ctx: &mut Rltk, slot_manager: Option<Data<Mutex<Pla
 }
 
 pub fn draw_ui(ctx: &mut Rltk, position: &Position, player: &Player, active_player_id: usize, slot_manager: Option<Data<Mutex<PlayerSlotManager>>>) {
-
     let player_name = if let Some(slot_manager) = slot_manager {
         match &player.name {
             Some(name) => name.clone(),

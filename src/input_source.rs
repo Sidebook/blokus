@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use serde::{Serialize, Deserialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Input {
     RequestBroadcast,
     Left,
@@ -14,12 +14,19 @@ pub enum Input {
     GiveUp,
     Cancel,
     Enter,
+    Undo,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct UserInput {
+    pub player_id: i32,
+    pub token: Option<i32>,
+    pub input: Input,
 }
 
 pub struct InputQueue {
-    pub queue: VecDeque<(i32, Input)>,
+    pub queue: VecDeque<UserInput>,
     pub broadcast_requested: bool,
-    // pub sources: Vec<&'a dyn InputSource>,
 }
 
 impl InputQueue {
@@ -29,34 +36,11 @@ impl InputQueue {
             broadcast_requested: false
         }
     }
-    pub fn push(&mut self, player_id: i32, input: Input) {
-        self.queue.push_back((player_id, input));
+    pub fn push(&mut self, user_input: UserInput) {
+        self.queue.push_back(user_input);
     }
 
-    pub fn pop(&mut self) -> Option<(i32, Input)> {
-        match self.queue.pop_front() {
-            Some((_, Input::RequestBroadcast)) => {
-                self.broadcast_requested = true;
-                self.pop()
-            }
-            otherwise => otherwise
-        }
-    }
-
-    pub fn consume_broadcast(&mut self) -> bool {
-        let broadcast_requested = self.broadcast_requested;
-        self.broadcast_requested = false;
-        broadcast_requested
-    }
-
-    pub fn pop_for(&mut self, player_id: i32) -> Option<Input> {
-        while !self.queue.is_empty() {
-            if let Some((pid, i)) = self.pop() {
-                if pid == player_id {
-                    return Some(i);
-                }
-            }
-        }
-        None
+    pub fn pop(&mut self) -> Option<UserInput> {
+        self.queue.pop_front()
     }
 }
