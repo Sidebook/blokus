@@ -43,24 +43,27 @@ impl Map {
         }
     }
 
-    pub fn bind(&mut self, player: &Player, start_x: i32, start_y: i32) {
+    pub fn bind(&mut self, player: &mut Player, start_x: i32, start_y: i32) {
+        let start = Point::new(start_x, start_y);
+
         self.colors.insert(player.id, player.color);
-        self.starts.insert(player.id, Point::new(start_x, start_y));
+        self.starts.insert(player.id, start);
+        player.cursor = start;
     }
 
-    pub fn bind_left_top(&mut self, player: &Player) {
+    pub fn bind_left_top(&mut self, player: &mut Player) {
         self.bind(player, 1, 1);
     }
 
-    pub fn bind_right_top(&mut self, player: &Player) {
+    pub fn bind_right_top(&mut self, player: &mut Player) {
         self.bind(player, self.width as i32 - 2, 1);
     }
 
-    pub fn bind_left_bottom(&mut self, player: &Player) {
+    pub fn bind_left_bottom(&mut self, player: &mut Player) {
         self.bind(player, 1, self.height as i32 - 2);
     }
 
-    pub fn bind_right_bottom(&mut self, player: &Player) {
+    pub fn bind_right_bottom(&mut self, player: &mut Player) {
         self.bind(player, self.width as i32 - 2, self.height as i32 - 2);
     }
 

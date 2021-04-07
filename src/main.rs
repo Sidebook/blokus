@@ -514,15 +514,11 @@ impl State {
 
         let mut map = Map::new(27, 20, 22, 22);
         {
-            let players_store = self.ecs.read_storage::<Player>();
-            let player_comps: Vec<&Player> = players
-                .iter()
-                .map(|e| players_store.get(*e).unwrap())
-                .collect();
-            map.bind_left_top(player_comps[0]);
-            map.bind_right_top(player_comps[1]);
-            map.bind_right_bottom(player_comps[2]);
-            map.bind_left_bottom(player_comps[3]);
+            let mut players_store = self.ecs.write_storage::<Player>();
+            map.bind_left_top(players_store.get_mut(players[0]).unwrap());
+            map.bind_right_top(players_store.get_mut(players[1]).unwrap());
+            map.bind_right_bottom(players_store.get_mut(players[2]).unwrap());
+            map.bind_left_bottom(players_store.get_mut(players[3]).unwrap());
         }
 
         self.ecs.insert(players);
@@ -539,13 +535,9 @@ impl State {
 
         let mut map = Map::new(30, 23, 16, 16);
         {
-            let players_store = self.ecs.read_storage::<Player>();
-            let player_comps: Vec<&Player> = players
-                .iter()
-                .map(|e| players_store.get(*e).unwrap())
-                .collect();
-            map.bind(player_comps[0], 5, 5);
-            map.bind(player_comps[1], 10, 10);
+            let mut players_store = self.ecs.write_storage::<Player>();
+            map.bind(players_store.get_mut(players[0]).unwrap(), 5, 5);
+            map.bind(players_store.get_mut(players[1]).unwrap(), 10, 10);
         }
 
         self.ecs.insert(players);
@@ -563,13 +555,9 @@ impl State {
 
         let mut map = Map::new(27, 20, 7, 7);
         {
-            let players_store = self.ecs.read_storage::<Player>();
-            let player_comps: Vec<&Player> = players
-                .iter()
-                .map(|e| players_store.get(*e).unwrap())
-                .collect();
-            map.bind(player_comps[0], 1, 1);
-            map.bind(player_comps[1], 5, 5);
+            let mut players_store = self.ecs.write_storage::<Player>();
+            map.bind(players_store.get_mut(players[0]).unwrap(), 1, 1);
+            map.bind(players_store.get_mut(players[1]).unwrap(), 5, 5);
         }
 
         self.ecs.insert(players);

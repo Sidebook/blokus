@@ -122,6 +122,7 @@ pub struct Player {
     pub rank: i32,
     pub remaining_tiles: i32,
     pub name: Option<String>,
+    pub cursor: Point,
 }
 
 impl Player {
@@ -137,6 +138,7 @@ impl Player {
             rank: 0,
             remaining_tiles: 0,
             name: name,
+            cursor: Point::new(0, 0),
         };
     }
 }

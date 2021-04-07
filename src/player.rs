@@ -84,8 +84,8 @@ fn player_input_select(gs: &mut State, user_input: UserInput) -> InputResult {
                 updated = select_next(player, true);
             }
             Input::Enter => {
-                active_position.x = map.width as i32 / 2 + map.x;
-                active_position.y = map.height as i32 / 2 + map.y;
+                active_position.x = player.cursor.x + map.x;
+                active_position.y = player.cursor.y + map.y;
                 updated = true;
                 newmode = Mode::Put
             }
@@ -175,6 +175,7 @@ fn player_input_put(gs: &mut State, user_input: UserInput) -> InputResult {
 
                 if map.try_put(put_to, active_polynomio, active_player_id as i32) {
                     player.fixed[player.select] = true;
+                    player.cursor = put_to;
                     if !select_next(player, false) {
                         player.end = true;
                         ended = true;
@@ -289,8 +290,8 @@ pub fn player_input_client(gs: &mut ClientState, ctx: &mut Rltk) -> Mode {
                         select_next(player, true);
                     }
                     Input::Enter => {
-                        active_position.x = map.width as i32 / 2 + map.x;
-                        active_position.y = map.height as i32 / 2 + map.y;
+                        active_position.x = player.cursor.x + map.x;
+                        active_position.y = player.cursor.y + map.y;
                         return Mode::Put;
                     }
                     Input::GiveUp => {
