@@ -1,12 +1,11 @@
-use crate::PlayerSlotManager;
-use std::sync::Mutex;
-use actix_web::web::Data;
 use crate::Mode;
+use crate::PlayerSlotManager;
+use actix_web::web::Data;
 use specs::prelude::*;
+use std::sync::Mutex;
 
 use super::{Map, Player, Polynomio, Position, Rect, EMPTY, WALL};
 use rltk::{Rltk, RGB};
-
 
 pub fn render(ecs: &World, ctx: &mut Rltk, slot_manager: Option<Data<Mutex<PlayerSlotManager>>>) {
     ctx.cls();
@@ -25,12 +24,17 @@ pub fn render(ecs: &World, ctx: &mut Rltk, slot_manager: Option<Data<Mutex<Playe
         Mode::Finish => {
             let entities = ecs.entities();
             let players = ecs.read_storage::<Player>();
-            let winner = (&entities, &players).join().filter(|(_, player)| player.rank == 1).next().unwrap().1;
+            let winner = (&entities, &players)
+                .join()
+                .filter(|(_, player)| player.rank == 1)
+                .next()
+                .unwrap()
+                .1;
             match &winner.name {
                 Some(name) => vec![format!["{} won!", name]],
                 None => vec![format!["Player #{} won!", winner.id + 1]],
             }
-        },
+        }
     };
     for (i, dialog) in dialogs.iter().enumerate() {
         ctx.print(5, i * 2 + 60, dialog);
@@ -38,7 +42,7 @@ pub fn render(ecs: &World, ctx: &mut Rltk, slot_manager: Option<Data<Mutex<Playe
 
     draw_map(ecs, ctx);
     draw_uis(&ecs, ctx, slot_manager);
-    
+
     draw_polynomios(&ecs, ctx, mode, true);
     draw_polynomios(&ecs, ctx, mode, false);
 
@@ -78,7 +82,7 @@ pub fn render(ecs: &World, ctx: &mut Rltk, slot_manager: Option<Data<Mutex<Playe
     }
 }
 
-pub fn draw_map(ecs: & World, ctx: &mut Rltk) {
+pub fn draw_map(ecs: &World, ctx: &mut Rltk) {
     let map = ecs.read_resource::<Map>();
 
     for (idx, &tile) in map.map.iter().enumerate() {
@@ -113,12 +117,7 @@ pub fn draw_map(ecs: & World, ctx: &mut Rltk) {
     }
 }
 
-pub fn draw_polynomios(
-    ecs: & World,
-    ctx: &mut Rltk,
-    mode: Mode,
-    bg: bool,
-) {
+pub fn draw_polynomios(ecs: &World, ctx: &mut Rltk, mode: Mode, bg: bool) {
     let positions = ecs.read_storage::<Position>();
     let polynomios = ecs.read_storage::<Polynomio>();
     for (pos, polynomio) in (&positions, &polynomios).join() {
@@ -182,7 +181,6 @@ pub fn draw_rect(ctx: &mut Rltk, position: &Position, rect: &Rect) {
     }
 }
 
-
 pub fn draw_uis(ecs: &World, ctx: &mut Rltk, slot_manager: Option<Data<Mutex<PlayerSlotManager>>>) {
     let positions = ecs.read_storage::<Position>();
     let players = ecs.read_storage::<Player>();
@@ -193,7 +191,13 @@ pub fn draw_uis(ecs: &World, ctx: &mut Rltk, slot_manager: Option<Data<Mutex<Pla
     }
 }
 
-pub fn draw_ui(ctx: &mut Rltk, position: &Position, player: &Player, active_player_id: usize, slot_manager: Option<Data<Mutex<PlayerSlotManager>>>) {
+pub fn draw_ui(
+    ctx: &mut Rltk,
+    position: &Position,
+    player: &Player,
+    active_player_id: usize,
+    slot_manager: Option<Data<Mutex<PlayerSlotManager>>>,
+) {
     let player_name = if let Some(slot_manager) = slot_manager {
         match &player.name {
             Some(name) => name.clone(),

@@ -1,7 +1,7 @@
-use crate::{ClientState, UserInput};
 use super::{
     GiveUpEvent, Input, Map, Mode, Player, Polynomio, Position, PutEvent, State, TurnChangeEvent,
 };
+use crate::{ClientState, UserInput};
 use rltk::{Point, Rltk, VirtualKeyCode};
 use specs::Entity;
 use specs::WorldExt;
@@ -24,7 +24,7 @@ pub fn player_input(gs: &mut State, user_input: UserInput) -> InputResult {
         return Updated {
             newmode: mode,
             trigger: Some(user_input),
-        }
+        };
     }
 
     if user_input.input == Input::Undo && mode == Mode::Select {
@@ -37,15 +37,25 @@ pub fn player_input(gs: &mut State, user_input: UserInput) -> InputResult {
 
     let active_player_id = *gs.ecs.read_resource::<usize>() as i32;
     let result = match (user_input.player_id, mode) {
-        (_, Mode::Initialize) => Updated { newmode: Mode::Select, trigger: None },
+        (_, Mode::Initialize) => Updated {
+            newmode: Mode::Select,
+            trigger: None,
+        },
         (pid, Mode::Select) if pid == active_player_id => player_input_select(gs, user_input),
         (pid, Mode::Put) if pid == active_player_id => player_input_put(gs, user_input),
         (_, _) => Noop,
     };
 
-    if let Updated { newmode: _, trigger } = result.clone() {
+    if let Updated {
+        newmode: _,
+        trigger,
+    } = result.clone()
+    {
         if gs.is_finished() {
-            return Updated { newmode: Mode::Finish, trigger};
+            return Updated {
+                newmode: Mode::Finish,
+                trigger,
+            };
         }
     }
     result
@@ -98,7 +108,10 @@ fn player_input_select(gs: &mut State, user_input: UserInput) -> InputResult {
     }
 
     match updated {
-        true => Updated {newmode, trigger: Some(user_input)},
+        true => Updated {
+            newmode,
+            trigger: Some(user_input),
+        },
         false => Noop,
     }
 }
@@ -197,7 +210,10 @@ fn player_input_put(gs: &mut State, user_input: UserInput) -> InputResult {
     }
 
     match updated {
-        true => Updated {newmode, trigger: Some(user_input)},
+        true => Updated {
+            newmode,
+            trigger: Some(user_input),
+        },
         false => Noop,
     }
 }
@@ -240,7 +256,6 @@ pub fn map_virtual_key_code(key: Option<VirtualKeyCode>) -> Option<Input> {
     }
 }
 
-
 pub fn player_input_client(gs: &mut ClientState, ctx: &mut Rltk) -> Mode {
     let mode = *gs.ecs.fetch::<Mode>();
 
@@ -264,7 +279,8 @@ pub fn player_input_client(gs: &mut ClientState, ctx: &mut Rltk) -> Mode {
                 let mut players = gs.ecs.write_storage::<Player>();
                 let player = players.get_mut(player_entity).unwrap();
                 let mut positions = gs.ecs.write_storage::<Position>();
-                let mut active_position = positions.get_mut(player.polynomios[player.select]).unwrap();
+                let mut active_position =
+                    positions.get_mut(player.polynomios[player.select]).unwrap();
                 match input {
                     Input::Right => {
                         select_next(player, false);
@@ -286,7 +302,7 @@ pub fn player_input_client(gs: &mut ClientState, ctx: &mut Rltk) -> Mode {
             }
             Mode::Put => {
                 let player_entity = gs.ecs.fetch::<Vec<Entity>>()[active_player_id];
-                
+
                 let mut map = gs.ecs.write_resource::<Map>();
                 let mut positions = gs.ecs.write_storage::<Position>();
                 let mut polynomios = gs.ecs.write_storage::<Polynomio>();
@@ -320,7 +336,8 @@ pub fn player_input_client(gs: &mut ClientState, ctx: &mut Rltk) -> Mode {
                     }
                     Input::Enter => {
                         active_position.to_point();
-                        let put_to = Point::new(active_position.x - map.x, active_position.y - map.y);
+                        let put_to =
+                            Point::new(active_position.x - map.x, active_position.y - map.y);
                         map.try_put(put_to, active_polynomio, active_player_id as i32);
                         gs.locked = true;
                     }
@@ -333,7 +350,7 @@ pub fn player_input_client(gs: &mut ClientState, ctx: &mut Rltk) -> Mode {
                 }
                 Mode::Put
             }
-            Mode::Finish => Mode::Finish
+            Mode::Finish => Mode::Finish,
         },
         None => mode,
     }

@@ -1,25 +1,30 @@
-use crate::UserInput;
-use crate::ClientMessage;
 use super::{Input, InputQueue};
+use crate::ClientMessage;
+use crate::UserInput;
 use actix::prelude::*;
 use actix_web::web::Data;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
+use serde::{Deserialize, Serialize};
+use serde_json;
 use std::sync::Arc;
 use std::sync::Mutex;
-use serde::{Serialize, Deserialize};
-use serde_json;
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum ServerMessage {
-    Sync { serialized_data: String, trigger: UserInput },
-    Reject { reason: String },
+    Sync {
+        serialized_data: String,
+        trigger: UserInput,
+    },
+    Reject {
+        reason: String,
+    },
 }
 
 #[derive(Message, Clone)]
 #[rtype(result = "()")]
 pub struct ArcServerMessage {
-    pub message: Arc<ServerMessage>
+    pub message: Arc<ServerMessage>,
 }
 
 #[derive(Clone)]
@@ -61,7 +66,7 @@ impl PlayerSlotManager {
         Ok(())
     }
 
-    pub fn get<'a>(&'a mut self, id: usize) -> Option<&'a PlayerSlot>{
+    pub fn get<'a>(&'a mut self, id: usize) -> Option<&'a PlayerSlot> {
         self.slots[id].as_ref()
     }
 
@@ -76,7 +81,7 @@ impl PlayerSlotManager {
         updated
     }
 
-    pub fn len(& self) -> usize {
+    pub fn len(&self) -> usize {
         self.slots.len()
     }
 }
@@ -93,15 +98,22 @@ impl WebSocketSession {
         self.ism.lock().unwrap().push(user_input);
     }
 
-    fn reject(&self, ctx: &mut actix_web_actors::ws::WebsocketContext<WebSocketSession>, reason: String) {
-        ctx.text(serde_json::to_string(&ServerMessage::Reject{ reason })
-                .expect("Faield to serialize the Reject server message."));
+    fn reject(
+        &self,
+        ctx: &mut actix_web_actors::ws::WebsocketContext<WebSocketSession>,
+        reason: String,
+    ) {
+        ctx.text(
+            serde_json::to_string(&ServerMessage::Reject { reason })
+                .expect("Faield to serialize the Reject server message."),
+        );
     }
 
     fn handle_client_message(
         &mut self,
         ctx: &mut actix_web_actors::ws::WebsocketContext<WebSocketSession>,
-        message: &ClientMessage) {
+        message: &ClientMessage,
+    ) {
         match message {
             ClientMessage::Sit { player_id, name } => {
                 println!("Player ({}) sat the chair #{}", name, player_id);
@@ -113,23 +125,22 @@ impl WebSocketSession {
                 match slot_request {
                     Err(SlotRequestError::AlreadyExists) => {
                         self.reject(ctx, format!("slot #{} is already occupied.", player_id));
-                    },
+                    }
                     Err(SlotRequestError::IndexOutOfRange) => {
                         self.reject(ctx, format!("slot #{} is out of range.", player_id));
-                    },
+                    }
                     Ok(()) => {
                         self.slot = Some(slot);
                     }
                 }
             }
-            ClientMessage::Sync { } => {
+            ClientMessage::Sync {} => {
                 if let Some(_) = &self.slot {
-                    self.push_input(
-                        UserInput {
-                            player_id: self.slot.as_ref().unwrap().id as i32,
-                            input: Input::RequestBroadcast,
-                            token: None,
-                        });
+                    self.push_input(UserInput {
+                        player_id: self.slot.as_ref().unwrap().id as i32,
+                        input: Input::RequestBroadcast,
+                        token: None,
+                    });
                 } else {
                     self.reject(ctx, format!("No slot assigned."));
                 }
@@ -201,9 +212,10 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WebSocketSession 
 
 impl Handler<ArcServerMessage> for WebSocketSession {
     type Result = ();
-    
+
     fn handle(&mut self, msg: ArcServerMessage, ctx: &mut Self::Context) {
-        let serialized = &serde_json::to_string(&*msg.message).expect("Failed to serialize the server message.");
+        let serialized =
+            &serde_json::to_string(&*msg.message).expect("Failed to serialize the server message.");
         ctx.text(serialized);
     }
 }

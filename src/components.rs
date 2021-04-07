@@ -1,14 +1,13 @@
-use crate::Mode;
-use serde::{Serialize, Deserialize};
-use specs::saveload::{Marker, ConvertSaveload};
-use specs::error::NoError;
 use super::Map;
+use crate::entity_vec::EntityVec;
+use crate::Mode;
 use rltk::{Point, RGB};
+use serde::{Deserialize, Serialize};
+use specs::error::NoError;
 use specs::prelude::*;
+use specs::saveload::{ConvertSaveload, Marker};
 use specs_derive::*;
 use std::cmp::min;
-use crate::entity_vec::EntityVec;
-
 
 #[derive(Component)]
 pub struct SyncOnline;

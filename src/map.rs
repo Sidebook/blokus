@@ -1,7 +1,7 @@
 use super::{Player, Polynomio};
 use rltk::{Point, RGB};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
 
 pub const EMPTY: i32 = -1;
 pub const WALL: i32 = -2;

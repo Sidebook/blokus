@@ -1,12 +1,12 @@
 use actix_web::web::Data;
 use clap::{App, AppSettings, Arg, SubCommand};
+use rand::prelude::*;
 use rltk::{GameState, Point, Rltk, RGB};
+use serde::{Deserialize, Serialize};
 use specs::prelude::*;
+use specs::saveload::{MarkedBuilder, SimpleMarker, SimpleMarkerAllocator};
 use std::sync::Arc;
 use std::sync::Mutex;
-use specs::saveload::{SimpleMarker, SimpleMarkerAllocator, MarkedBuilder};
-use serde::{Serialize, Deserialize};
-use rand::prelude::*;
 
 mod components;
 pub use components::*;
@@ -46,7 +46,6 @@ pub use entity_vec::*;
 
 mod client;
 pub use client::*;
-
 
 pub struct State {
     pub ecs: World,
@@ -123,11 +122,12 @@ impl State {
     pub fn broadcast(&mut self, trigger: UserInput) {
         if let Some(broadcast) = &self.broadcast {
             if let Some(addr) = &broadcast.lock().unwrap().addr {
-                addr.try_send(ArcServerMessage{
-                    message: Arc::new(ServerMessage::Sync{
+                addr.try_send(ArcServerMessage {
+                    message: Arc::new(ServerMessage::Sync {
                         serialized_data: dump_game(&mut self.ecs),
                         trigger,
-                    })})
+                    }),
+                })
                 .expect("Failed to broadcast");
             }
         }
@@ -149,7 +149,7 @@ impl GameState for State {
             if sm.consume_updated() {
                 let mut players = self.ecs.write_storage::<Player>();
                 let entities = self.ecs.entities();
-                for (_, player) in (&entities, & mut players).join() {
+                for (_, player) in (&entities, &mut players).join() {
                     if let Some(slot) = sm.get(player.id as usize) {
                         player.name = Some(slot.name.clone())
                     } else {
@@ -164,7 +164,9 @@ impl GameState for State {
             if *mode == Mode::Initialize {
                 *mode = Mode::Select;
                 true
-            } else { false }
+            } else {
+                false
+            }
         };
 
         if initializing {
@@ -175,14 +177,18 @@ impl GameState for State {
 
         let active_player_id = *self.ecs.read_resource::<usize>() as i32;
 
-        let host_player_id = if self.use_local_input {active_player_id} else {self.my_player_id};
-        map_virtual_key_code(ctx.key).map(|i| self.push_input(
-            UserInput {
+        let host_player_id = if self.use_local_input {
+            active_player_id
+        } else {
+            self.my_player_id
+        };
+        map_virtual_key_code(ctx.key).map(|i| {
+            self.push_input(UserInput {
                 player_id: host_player_id,
                 input: i,
                 token: Some(0),
-            }
-        ));
+            })
+        });
 
         let mut input_result: InputResult = InputResult::Noop;
 
@@ -193,8 +199,10 @@ impl GameState for State {
                 input_result = player_input(self, user_input);
                 println!("  --> {:?}", input_result);
                 match input_result.clone() {
-                    InputResult::Updated {..} => {input_result = input_result},
-                    InputResult::Noop => { continue; }
+                    InputResult::Updated { .. } => input_result = input_result,
+                    InputResult::Noop => {
+                        continue;
+                    }
                 }
             }
             break;
@@ -204,7 +212,7 @@ impl GameState for State {
         polynomio_indexing_system.run_now(&self.ecs);
 
         match input_result {
-            InputResult::Updated {newmode, trigger} => {
+            InputResult::Updated { newmode, trigger } => {
                 {
                     let mut mode = self.ecs.write_resource::<Mode>();
                     *mode = newmode;
@@ -238,7 +246,6 @@ pub struct ClientState {
 
 impl ClientState {
     fn new(url: String, player_id: i32, player_name: String) -> Self {
-
         let mut ecs = World::new();
 
         ecs.register::<Position>();
@@ -257,7 +264,11 @@ impl ClientState {
         let client = Client::new(url.clone(), player_id, player_name.clone());
 
         if let Err(err) = client {
-            eprintln!("[ERROR] Failed to connect the server (\"{}\"): {:?}", url.clone(), err);
+            eprintln!(
+                "[ERROR] Failed to connect the server (\"{}\"): {:?}",
+                url.clone(),
+                err
+            );
             std::process::exit(1);
         }
 
@@ -282,13 +293,13 @@ impl ClientState {
 impl GameState for ClientState {
     fn tick(&mut self, ctx: &mut rltk::Rltk) {
         map_virtual_key_code(ctx.key).map(|i| {
-            if i != Input::Undo && !self.locked{
+            if i != Input::Undo && !self.locked {
                 let token: i32 = self.rnd.gen();
                 self.latest_token = token;
                 self.client.send_input(i, token);
             }
         });
-        
+
         let newmode = player_input_client(self, ctx);
         {
             let mut mode = self.ecs.write_resource::<Mode>();
@@ -298,20 +309,31 @@ impl GameState for ClientState {
         match self.client.next_message() {
             Some(message) => match message {
                 ServerMessage::Reject { reason } => {
-                    eprintln!("[ERROR] Rejected from the server: {:?}. Exiting ...", reason);
+                    eprintln!(
+                        "[ERROR] Rejected from the server: {:?}. Exiting ...",
+                        reason
+                    );
                     std::process::exit(1);
-                },
-                ServerMessage::Sync { serialized_data, trigger } => {
-                    if trigger.player_id != self.player_id || trigger.input == Input::RequestBroadcast || trigger.token == Some(self.latest_token) {
+                }
+                ServerMessage::Sync {
+                    serialized_data,
+                    trigger,
+                } => {
+                    if trigger.player_id != self.player_id
+                        || trigger.input == Input::RequestBroadcast
+                        || trigger.token == Some(self.latest_token)
+                    {
                         println!("Applying a game update...");
                         load_game(&mut self.ecs, &serialized_data);
-                        println!("Applied the game update: mode: {:?}, apid: {:?}",
+                        println!(
+                            "Applied the game update: mode: {:?}, apid: {:?}",
                             *self.ecs.fetch::<Mode>(),
-                            *self.ecs.fetch::<usize>());
+                            *self.ecs.fetch::<usize>()
+                        );
                         self.locked = false;
                     }
                 }
-            }
+            },
             None => {}
         }
 
@@ -338,7 +360,7 @@ fn main() -> rltk::BError {
                 .short("n")
                 .long("name")
                 .help("Player name. Default: Anonymous")
-                .takes_value(true)
+                .takes_value(true),
         )
         .subcommand(SubCommand::with_name("play"))
         .subcommand(
@@ -376,7 +398,6 @@ fn main() -> rltk::BError {
         std::process::exit(1);
     }
 
-
     use rltk::RltkBuilder;
     let context = RltkBuilder::simple(72, 64)?.with_title("Blokus").build()?;
 
@@ -402,8 +423,13 @@ fn main() -> rltk::BError {
             _ => 4,
         } as usize;
         let slot_manager = Data::new(Mutex::new(PlayerSlotManager::new(n_players)));
-        slot_manager.lock().unwrap().request(
-            PlayerSlot {id: my_player_id as usize, name: String::from(name)})
+        slot_manager
+            .lock()
+            .unwrap()
+            .request(PlayerSlot {
+                id: my_player_id as usize,
+                name: String::from(name),
+            })
             .expect("Failed to allocate a slot");
 
         let ism_ref = ism.clone();
@@ -411,8 +437,7 @@ fn main() -> rltk::BError {
         let slot_manager_ref = slot_manager.clone();
 
         std::thread::spawn(move || {
-            start(ism_ref, broadcast_ref, slot_manager)
-                .expect("Failed to run a server");
+            start(ism_ref, broadcast_ref, slot_manager).expect("Failed to run a server");
             std::process::exit(0);
         });
 
@@ -422,7 +447,8 @@ fn main() -> rltk::BError {
             my_player_id,
             false,
             Some(broadcast),
-            Some(slot_manager_ref));
+            Some(slot_manager_ref),
+        );
 
         rltk::main_loop(context, gs)
     } else if let Some(ref sub_matches) = matches.subcommand_matches("join") {

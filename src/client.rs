@@ -1,11 +1,11 @@
 use crate::server::ServerMessage;
-use websocket::ClientBuilder;
+use crate::Input;
+use actix::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::collections::VecDeque;
-use actix::prelude::*;
-use serde::{Serialize, Deserialize};
-use crate::Input;
+use websocket::ClientBuilder;
 
 #[derive(Message, Clone, Serialize, Deserialize)]
 #[rtype(result = "()")]
@@ -23,11 +23,13 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(url: String, player_id: i32, player_name: String) -> Result<Self, websocket::WebSocketError> {
+    pub fn new(
+        url: String,
+        player_id: i32,
+        player_name: String,
+    ) -> Result<Self, websocket::WebSocketError> {
         let msg_queue = Arc::new(Mutex::new(VecDeque::new()));
-        let client = ClientBuilder::new(&url)
-            .unwrap()
-            .connect_insecure()?;
+        let client = ClientBuilder::new(&url).unwrap().connect_insecure()?;
 
         let (mut receiver, sender) = client.split().unwrap();
 
@@ -38,8 +40,8 @@ impl Client {
                 match message {
                     Ok(websocket::OwnedMessage::Text(text)) => {
                         msg_queue_clone.lock().unwrap().push_back(text);
-                    },
-                    Ok(_) => {},
+                    }
+                    Ok(_) => {}
                     Err(websocket::WebSocketError::NoDataAvailable) => {
                         eprintln!("[ERROR] Disconnected from server. Exiting...");
                         std::process::exit(1);
@@ -73,7 +75,7 @@ impl Client {
             let serialized_message = queue.pop_front().unwrap();
             let message = serde_json::from_str::<ServerMessage>(&serialized_message)
                 .expect("Failed to deserialize the server message");
-            
+
             let truncated = {
                 let mut formatted = format!("{:?}", message);
                 if formatted.len() > 100 {
@@ -87,9 +89,9 @@ impl Client {
         }
     }
 
-    pub fn send(&mut self, message: & ClientMessage) {
-        let serialized = serde_json::to_string(message)
-                .expect("Failed to serialize the client message.");
+    pub fn send(&mut self, message: &ClientMessage) {
+        let serialized =
+            serde_json::to_string(message).expect("Failed to serialize the client message.");
 
         self.websocket_sender
             .send_message(&websocket::Message::text(serialized))
@@ -97,14 +99,14 @@ impl Client {
     }
 
     pub fn send_sit(&mut self) {
-        self.send(&ClientMessage::Sit{
+        self.send(&ClientMessage::Sit {
             player_id: self.player_id,
             name: self.player_name.clone(),
         });
     }
 
     pub fn send_input(&mut self, input: Input, token: i32) {
-        self.send(&ClientMessage::Input{ input, token });
+        self.send(&ClientMessage::Input { input, token });
     }
 
     pub fn send_sync(&mut self) {

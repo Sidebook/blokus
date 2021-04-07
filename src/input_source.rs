@@ -1,5 +1,5 @@
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Input {
@@ -33,7 +33,7 @@ impl InputQueue {
     pub fn new() -> Self {
         InputQueue {
             queue: VecDeque::new(),
-            broadcast_requested: false
+            broadcast_requested: false,
         }
     }
     pub fn push(&mut self, user_input: UserInput) {
