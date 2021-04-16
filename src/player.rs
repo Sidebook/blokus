@@ -339,8 +339,9 @@ pub fn player_input_client(gs: &mut ClientState, ctx: &mut Rltk) -> Mode {
                         active_position.to_point();
                         let put_to =
                             Point::new(active_position.x - map.x, active_position.y - map.y);
-                        map.try_put(put_to, active_polynomio, active_player_id as i32);
-                        gs.locked = true;
+                        if map.try_put(put_to, active_polynomio, active_player_id as i32) {
+                            gs.locked = true;
+                        }
                     }
                     Input::Cancel => {
                         active_position.reset();
