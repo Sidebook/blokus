@@ -144,6 +144,7 @@ pub enum Mode {
 
 impl GameState for State {
     fn tick(&mut self, ctx: &mut Rltk) {
+        let mut updated = false;
         if let Some(slot_maneger) = &self.slot_manager {
             let mut sm = slot_maneger.lock().unwrap();
             if sm.consume_updated() {
@@ -153,13 +154,14 @@ impl GameState for State {
                     if let Some(slot) = sm.get(player.id as usize) {
                         player.name = Some(slot.name.clone())
                     } else {
-                        player.name = None
+                        player.name = Some(format!("Player #{} (Not connected)", player.id))
                     }
                 }
+                updated = true;
             }
         }
 
-        let initializing = {
+        updated |= {
             let mut mode = self.ecs.write_resource::<Mode>();
             if *mode == Mode::Initialize {
                 *mode = Mode::Select;
@@ -169,7 +171,7 @@ impl GameState for State {
             }
         };
 
-        if initializing {
+        if updated {
             let mut stats = StatsCollectSystem { winner: 0 };
             stats.run_now(&self.ecs);
             render(&self.ecs, ctx, self.slot_manager.clone());
