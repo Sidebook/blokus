@@ -5,6 +5,7 @@ use actix::prelude::*;
 use actix_web::web::Data;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer};
 use actix_web_actors::ws;
+use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::sync::Arc;
@@ -15,6 +16,9 @@ pub enum ServerMessage {
     Sync {
         serialized_data: String,
         trigger: UserInput,
+    },
+    Accept {
+        player_id: i32,
     },
     Reject {
         reason: String,
@@ -84,6 +88,15 @@ impl PlayerSlotManager {
     pub fn len(&self) -> usize {
         self.slots.len()
     }
+
+    pub fn empty_slots(&self) -> Vec<usize> {
+        self.slots
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.is_none())
+            .map(|(i, _)| i)
+            .collect()
+    }
 }
 
 struct WebSocketSession {
@@ -109,6 +122,17 @@ impl WebSocketSession {
         );
     }
 
+    fn accept(
+        &self,
+        ctx: &mut actix_web_actors::ws::WebsocketContext<WebSocketSession>,
+        player_id: i32,
+    ) {
+        ctx.text(
+            serde_json::to_string(&ServerMessage::Accept { player_id })
+                .expect("Faild to serialize the Accept server message"),
+        );
+    }
+
     fn handle_client_message(
         &mut self,
         ctx: &mut actix_web_actors::ws::WebsocketContext<WebSocketSession>,
@@ -116,21 +140,35 @@ impl WebSocketSession {
     ) {
         match message {
             ClientMessage::Sit { player_id, name } => {
-                println!("Player ({}) sat the chair #{}", name, player_id);
+                let player_id = match player_id {
+                    Some(id) => *id,
+                    None => {
+                        let available_ids = self.slot_manager.lock().unwrap().empty_slots();
+                        if available_ids.len() == 0 {
+                            self.reject(ctx, String::from("The game is full."));
+                            return;
+                        }
+                        *available_ids.choose(&mut rand::thread_rng()).unwrap() as i32
+                    }
+                };
+
                 let slot = PlayerSlot {
-                    id: *player_id as usize,
+                    id: player_id as usize,
                     name: String::from(name),
                 };
+
                 let slot_request = self.slot_manager.lock().unwrap().request(slot.clone());
                 match slot_request {
                     Err(SlotRequestError::AlreadyExists) => {
-                        self.reject(ctx, format!("slot #{} is already occupied.", player_id));
+                        self.reject(ctx, format!("Chair #{} is already occupied.", player_id));
                     }
                     Err(SlotRequestError::IndexOutOfRange) => {
-                        self.reject(ctx, format!("slot #{} is out of range.", player_id));
+                        self.reject(ctx, format!("Chair #{} is out of range.", player_id));
                     }
                     Ok(()) => {
                         self.slot = Some(slot);
+                        println!("Player ({}) sat the chair #{}", name, player_id);
+                        self.accept(ctx, player_id);
                     }
                 }
             }

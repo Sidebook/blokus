@@ -265,7 +265,7 @@ pub fn player_input_client(gs: &mut ClientState, ctx: &mut Rltk) -> Mode {
     }
 
     let active_player_id = *gs.ecs.read_resource::<usize>();
-    if gs.player_id as usize != active_player_id {
+    if gs.player_id.unwrap() as usize != active_player_id {
         return mode;
     }
 

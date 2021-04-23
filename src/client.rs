@@ -10,24 +10,25 @@ use websocket::ClientBuilder;
 #[derive(Message, Clone, Serialize, Deserialize)]
 #[rtype(result = "()")]
 pub enum ClientMessage {
-    Sit { player_id: i32, name: String },
+    Sit {
+        player_id: Option<i32>,
+        name: String,
+    },
     Sync,
-    Input { input: Input, token: i32 },
+    Input {
+        input: Input,
+        token: i32,
+    },
 }
 
 pub struct Client {
-    pub player_id: i32,
     pub player_name: String,
     pub websocket_sender: websocket::sender::Writer<std::net::TcpStream>,
     pub message_queue: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl Client {
-    pub fn new(
-        url: String,
-        player_id: i32,
-        player_name: String,
-    ) -> Result<Self, websocket::WebSocketError> {
+    pub fn new(url: String, player_name: String) -> Result<Self, websocket::WebSocketError> {
         let msg_queue = Arc::new(Mutex::new(VecDeque::new()));
         let client = ClientBuilder::new(&url).unwrap().connect_insecure()?;
 
@@ -55,7 +56,6 @@ impl Client {
         });
 
         Ok(Client {
-            player_id,
             player_name,
             websocket_sender: sender,
             message_queue: msg_queue,
@@ -98,9 +98,9 @@ impl Client {
             .expect("Failed to send the client message.")
     }
 
-    pub fn send_sit(&mut self) {
+    pub fn send_sit(&mut self, player_id: Option<i32>) {
         self.send(&ClientMessage::Sit {
-            player_id: self.player_id,
+            player_id,
             name: self.player_name.clone(),
         });
     }
