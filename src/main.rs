@@ -408,9 +408,9 @@ fn main() -> rltk::BError {
         std::process::exit(1);
     }
 
-    let valid_name_pattern = regex::Regex::new(r"^[A-z_\-#@$%*,]+$").unwrap();
+    let valid_name_pattern = regex::Regex::new(r"^[A-z0-9_\-#@$%*,]+$").unwrap();
     if !valid_name_pattern.is_match(name) {
-        eprintln!("[ERROR] The name must match ^[A-z_-#@$%*,]+$");
+        eprintln!("[ERROR] The name must match ^[A-z0-9_-#@$%*,]+$");
         std::process::exit(1);
     }
 

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use super::{Input, InputQueue};
 use crate::ClientMessage;
 use crate::UserInput;
@@ -214,6 +215,12 @@ impl Actor for WebSocketSession {
         if let Some(slot) = &self.slot {
             self.slot_manager.lock().unwrap().remove(slot.id);
         }
+        self.ws_monitor
+            .get_ref()
+            .try_send(WebSocketClientUnregister {
+                address: _ctx.address(),
+            })
+            .expect("Failed to remove websocket session from WebSocketSessionMonitor");
         Running::Stop
     }
 }
@@ -260,7 +267,7 @@ impl Handler<ArcServerMessage> for WebSocketSession {
 
 #[derive(Clone)]
 pub struct WebsocketSessionMonitor {
-    addresses: Vec<Addr<WebSocketSession>>,
+    addresses: HashSet<Addr<WebSocketSession>>,
     broadcast: Data<Mutex<BroadCastTarget>>,
 }
 
@@ -270,8 +277,11 @@ struct WebSocketClientRegister {
     address: Addr<WebSocketSession>,
 }
 
-#[derive(MessageResponse)]
-struct WebSocketClientRegistration;
+#[derive(Message)]
+#[rtype(result = "()")]
+struct WebSocketClientUnregister {
+    address: Addr<WebSocketSession>,
+}
 
 impl Actor for WebsocketSessionMonitor {
     type Context = Context<Self>;
@@ -285,7 +295,15 @@ impl Handler<WebSocketClientRegister> for WebsocketSessionMonitor {
     type Result = ();
 
     fn handle(&mut self, register: WebSocketClientRegister, _: &mut Self::Context) {
-        self.addresses.push(register.address);
+        self.addresses.insert(register.address);
+    }
+}
+
+impl Handler<WebSocketClientUnregister> for WebsocketSessionMonitor {
+    type Result = ();
+
+    fn handle(&mut self, register: WebSocketClientUnregister, _: &mut Self::Context) {
+        self.addresses.remove(&register.address);
     }
 }
 
@@ -327,7 +345,7 @@ pub async fn start(
     slot_manager: Data<Mutex<PlayerSlotManager>>,
 ) -> std::io::Result<()> {
     let ws_monitor_addr = WebsocketSessionMonitor {
-        addresses: vec![],
+        addresses: HashSet::new(),
         broadcast: broadcast.clone(),
     }
     .start();
