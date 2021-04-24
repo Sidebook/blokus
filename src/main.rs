@@ -386,6 +386,11 @@ fn main() -> rltk::BError {
                     .short("p")
                     .long("player-id")
                     .takes_value(true),
+            ).arg(
+                Arg::with_name("join")
+                    .short("j")
+                    .long("join")
+                    .takes_value(false)
             ),
         )
         .subcommand(
@@ -429,24 +434,26 @@ fn main() -> rltk::BError {
             _ => 4,
         } as usize;
 
-        let my_player_id = sub_matches
-            .value_of("player-id")
-            .map(|pid| pid.parse::<i32>().unwrap())
-            .unwrap_or(rand::thread_rng().gen_range(0, n_players as i32));
-
         let ism: Data<Mutex<InputQueue>> = Data::new(Mutex::new(InputQueue::new()));
         let broadcast: Data<Mutex<BroadCastTarget>> =
             Data::new(Mutex::new(BroadCastTarget { addr: None }));
 
         let slot_manager = Data::new(Mutex::new(PlayerSlotManager::new(n_players)));
-        slot_manager
-            .lock()
-            .unwrap()
-            .request(PlayerSlot {
-                id: my_player_id as usize,
-                name: String::from(name),
-            })
-            .expect("Failed to allocate a slot");
+
+        let my_player_id = sub_matches
+                .value_of("player-id")
+                .map(|pid| pid.parse::<i32>().unwrap())
+                .unwrap_or(rand::thread_rng().gen_range(0, n_players as i32));
+        if sub_matches.is_present("join") {
+            slot_manager
+                .lock()
+                .unwrap()
+                .request(PlayerSlot {
+                    id: my_player_id as usize,
+                    name: String::from(name),
+                })
+                .expect("Failed to allocate a slot");
+        }
 
         let ism_ref = ism.clone();
         let broadcast_ref = broadcast.clone();
