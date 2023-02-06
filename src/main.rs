@@ -297,7 +297,7 @@ impl ClientState {
 impl GameState for ClientState {
     fn tick(&mut self, ctx: &mut rltk::Rltk) {
         map_virtual_key_code(ctx.key).map(|i| {
-            if i != Input::Undo && !self.locked {
+            if i == Input::Undo || !self.locked {
                 let token: i32 = self.rnd.gen();
                 self.latest_token = token;
                 self.client.send_input(i, token);
